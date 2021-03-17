@@ -7,6 +7,13 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NetProbe_Client", "NetProbe
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NetProbe_Server", "NetProbe_Server\NetProbe_Server.vcxproj", "{4B7D1EEE-911D-4369-AE53-EF13C31CCF13}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{A65CB211-96BE-4786-82C3-DD33B6D9EAA5}"
+	ProjectSection(SolutionItems) = preProject
+		netprobe_core.h = netprobe_core.h
+		tinycthread.c = tinycthread.c
+		tinycthread.h = tinycthread.h
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64

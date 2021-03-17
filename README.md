@@ -1,11 +1,8 @@
-# IERG4180_Project2
+# IERG4180_Project3
 
 ### SID: 1155109484
 
 ### Name: Wong Cho Hei
-
-
-The experiment report is named `Experiment-Asg2.docx`
 
 
 --------------
@@ -39,7 +36,3 @@ The experiment report is named `Experiment-Asg2.docx`
 >
 > To run the file, type `./netprobecli -send -proto tcp`
 >
-
-### Sample screenshot
-
-![FML](/screenshot1.jpg?raw=true "Sample screenshot")

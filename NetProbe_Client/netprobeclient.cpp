@@ -1,14 +1,14 @@
 /*
-	NetProbe project 1
+	NetProbe project 3
 	@author : Wong Cho Hei
 	SID : 1155109484
 */
 
 // The default command for using this exe is
-// cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project2\Debug
+// cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project3\IERG4180-NetProbe-3\Debug
 // netprobe_client.exe [arguments]
 
-#include "../core.h"
+#include "../netprobe_core.h"
 
 using namespace std;
 
@@ -29,63 +29,66 @@ int main(int argc, char* argv[]) {
 				usage_message_client();
 				return 0;
 			}
-			if (strcmp(argv[i], "-send") == 0) {
-				nc.mode = 1;
+			else if (strcmp(argv[i], "-send") == 0) {
+				nc.mode = NETPROBE_SEND_MODE;
 			}
-			if (strcmp(argv[i], "-recv") == 0) {
-				nc.mode = 2;
+			else if (strcmp(argv[i], "-recv") == 0) {
+				nc.mode = NETPROBE_RECV_MODE;
 			}
-			if (strcmp(argv[i], "-proto") == 0) {
+			else if (strcmp(argv[i], "-response") == 0 || strcmp(argv[i], "-resp") == 0) {
+				nc.mode = NETPROBE_RESP_MODE;
+			}
+			else if (strcmp(argv[i], "-proto") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					if (strcmp(strlwr(argv[i + 1]), "udp") == 0) {
-						nc.protocol = 1;
+						nc.protocol = NETPROBE_UDP_MODE;
 					}
-					if (strcmp(strlwr(argv[i + 1]), "tcp") == 0) {
-						nc.protocol = 2;
+					else if (strcmp(strlwr(argv[i + 1]), "tcp") == 0) {
+						nc.protocol = NETPROBE_TCP_MODE;
 					}
 				}
 			}
-			if (strcmp(argv[i], "-pktsize") == 0) {
+			else if (strcmp(argv[i], "-pktsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_size_inbyte = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-pktrate") == 0) {
+			else if (strcmp(argv[i], "-pktrate") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_rate_bytepersec = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-pktnum") == 0) {
+			else if (strcmp(argv[i], "-pktnum") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_num = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-stat") == 0) {
+			else if (strcmp(argv[i], "-stat") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.stat_displayspeed_perms = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-sbufsize") == 0) {
+			else if (strcmp(argv[i], "-sbufsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.sbufsize_inbyte = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-rhost") == 0) {
+			else if (strcmp(argv[i], "-rhost") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.rhostname = argv[i + 1];
 				}
 			}
-			if (strcmp(argv[i], "-lhost") == 0) {
+			else if (strcmp(argv[i], "-lhost") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.lhostname = argv[i + 1];
 				}
 			}
-			if (strcmp(argv[i], "-lport") == 0) {
+			else if (strcmp(argv[i], "-lport") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.lport = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-rbufsize") == 0) {
+			else if (strcmp(argv[i], "-rbufsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.rbufsize_inbyte = atoi(argv[i + 1]);
 				}
@@ -99,23 +102,23 @@ int main(int argc, char* argv[]) {
 	SOCKET s;
 	struct sockaddr_in server;
 
-#if (OSISWINDOWS == true)
-	WSADATA wsaData;    // For windows system socket startup
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		printf(" There are no useable winsock.dll\n");
-		printf(" Socket Initialisation failure. Error Code: %d.\n", WSAGetLastError());
-		return 1;
-	}
-#endif
+	#if (OSISWINDOWS == true)
+		WSADATA wsaData;    // For windows system socket startup
+		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+			printf(" There are no useable winsock.dll\n");
+			printf(" Socket Initialisation failure. Error Code: %d.\n", WSAGetLastError());
+			return 1;
+		}
+	#endif
 	//Initialisation success
 
 	if ((s = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET)
 	{
-#if(OSISWINDOWS==true)
-		printf(" Could not create socket : %d\n", WSAGetLastError());
-#else
-		perror(" Could not create socket.\n");
-#endif
+		#if(OSISWINDOWS==true)
+			printf(" Could not create socket : %d\n", WSAGetLastError());
+		#else
+			perror(" Could not create socket.\n");
+		#endif
 	}
 	//TCP socket create successful
 	printf("\n Socket created.\n");
@@ -142,11 +145,11 @@ int main(int argc, char* argv[]) {
 		//Set Send Buffer Size
 		if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)(&nc.sbufsize_inbyte), sizeof(nc.sbufsize_inbyte)) < 0)
 		{
-#if(OSISWINDOWS==true)
-			printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
-#else
-			perror(" setsockopt() for SO_KEEPALIVE failed.\n");
-#endif
+			#if(OSISWINDOWS==true)
+				printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+			#else
+				perror(" setsockopt() for SO_KEEPALIVE failed.\n");
+			#endif
 			return 5;
 		}
 	}
@@ -161,11 +164,11 @@ int main(int argc, char* argv[]) {
 	if (connect(s, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR)
 	{
 		puts(" Connection error.");
-#if(OSISWINDOWS==true)
-		closesocket(s);
-#else
-		close(s);
-#endif
+		#if(OSISWINDOWS==true)
+			closesocket(s);
+		#else
+			close(s);
+		#endif
 		return 1;
 	}
 
@@ -177,19 +180,19 @@ int main(int argc, char* argv[]) {
 
 	//UDP socket
 	if (nc.protocol == NETPROBE_UDP_MODE) {
-#if(OSISWINDOWS==true)
-		closesocket(s);	//Close the previous TCP socket
-#else
-		close(s);
-#endif
+		#if(OSISWINDOWS==true)
+			closesocket(s);	//Close the previous TCP socket
+		#else
+			close(s);
+		#endif
 
 		if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
 		{
-#if(OSISWINDOWS==true)
-			printf(" Could not create socket : %d\n", WSAGetLastError());
-#else
-			perror(" Could not create socket.\n");
-#endif
+			#if(OSISWINDOWS==true)
+				printf(" Could not create socket : %d\n", WSAGetLastError());
+			#else
+				perror(" Could not create socket.\n");
+			#endif
 			return 1;
 		}
 		printf(" Socket created.\n");
@@ -223,11 +226,11 @@ int main(int argc, char* argv[]) {
 			//Set Send Buffer Size
 			if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)(&nc.sbufsize_inbyte), sizeof(nc.sbufsize_inbyte)) < 0)
 			{
-#if(OSISWINDOWS==true)
-				printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
-#else
-				perror(" setsockopt() for SO_KEEPALIVE failed\n");
-#endif
+				#if(OSISWINDOWS==true)
+					printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+				#else
+					perror(" setsockopt() for SO_KEEPALIVE failed\n");
+				#endif
 				return 5;
 			}
 
@@ -254,11 +257,11 @@ int main(int argc, char* argv[]) {
 					int sendto_size = sendto(s, message, nc.pkt_size_inbyte, 0, (struct sockaddr*) & si_other, sizeof(si_other));
 					if (sendto_size == SOCKET_ERROR || sendto_size < 0)
 					{
-#if(OSISWINDOWS==true)
-						printf(" sendto() failed with error code : %d", WSAGetLastError());
-#else
-						perror(" sendto() failed.\n");
-#endif
+						#if(OSISWINDOWS==true)
+							printf(" sendto() failed with error code : %d", WSAGetLastError());
+						#else
+							perror(" sendto() failed.\n");
+						#endif
 						break;
 					}
 					total_sent_size += sendto_size;
@@ -267,12 +270,12 @@ int main(int argc, char* argv[]) {
 				}
 				sendInfo(nc, starting_time, pkt_num, total_sent_size);
 			}
-#if(OSISWINDOWS==true)
-			closesocket(s);
-			WSACleanup();
-#else
-			close(s);
-#endif
+			#if(OSISWINDOWS==true)
+				closesocket(s);
+				WSACleanup();
+			#else
+				close(s);
+			#endif
 		}
 		if (nc.mode == NETPROBE_RECV_MODE) {
 			//Recvfrom IP
@@ -300,11 +303,11 @@ int main(int argc, char* argv[]) {
 			}
 			if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)(&nc.rbufsize_inbyte), sizeof(nc.rbufsize_inbyte)) < 0)
 			{
-#if(OSISWINDOWS==true)
-				printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
-#else
-				perror(" setsockopt() for SO_KEEPALIVE failed\n");
-#endif
+				#if(OSISWINDOWS==true)
+					printf(" setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+				#else
+					perror(" setsockopt() for SO_KEEPALIVE failed\n");
+				#endif
 				return 5;
 			}
 
@@ -313,11 +316,11 @@ int main(int argc, char* argv[]) {
 			//Bind
 			if (bind(s, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR)
 			{
-#if(OSISWINDOWS==true)
-				cout << " failed with error code : " << WSAGetLastError() << "\n";
-#else
-				perror(" failed.\n");
-#endif
+				#if(OSISWINDOWS==true)
+					cout << " failed with error code : " << WSAGetLastError() << "\n";
+				#else
+					perror(" failed.\n");
+				#endif
 				exit(1);
 			}
 
@@ -341,22 +344,22 @@ int main(int argc, char* argv[]) {
 			while (true)
 			{
 				//Try to receive some data, this is a blocking call
-#if(OSISWINDOWS==true)
-				recv_len = recvfrom(s, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
-#else
-				unsigned int slen_linux = sizeof(si_other);
-				recv_len = recvfrom(s, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
-#endif
-				clock_t recv_pkt_time = clock();
-				if (recv_len == SOCKET_ERROR || recv_len < 0)
-				{
-#if(OSISWINDOWS==true)
-					if (WSAGetLastError() == WSAEWOULDBLOCK)
-						continue;
-					printf(" recvfrom() failed with error code : %d\n", WSAGetLastError());
-#else
-					perror(" recvfrom() failed.\n");
-#endif
+				#if(OSISWINDOWS==true)
+					recv_len = recvfrom(s, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
+				#else
+					unsigned int slen_linux = sizeof(si_other);
+					recv_len = recvfrom(s, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
+				#endif
+					clock_t recv_pkt_time = clock();
+					if (recv_len == SOCKET_ERROR || recv_len < 0)
+					{
+				#if(OSISWINDOWS==true)
+						if (WSAGetLastError() == WSAEWOULDBLOCK)
+							continue;
+						printf(" recvfrom() failed with error code : %d\n", WSAGetLastError());
+				#else
+						perror(" recvfrom() failed.\n");
+				#endif
 					break;
 				}
 				if (!shown_info) {
@@ -397,11 +400,11 @@ int main(int argc, char* argv[]) {
 				ZeroMemory(buf, sizeof(buf));
 				prev_pkt_time = recv_pkt_time;
 			}
-#if(OSISWINDOWS==true)
-			closesocket(s);
-#else
-			close(s);
-#endif
+			#if(OSISWINDOWS==true)
+				closesocket(s);
+			#else
+				close(s);
+			#endif
 		}
 	}
 
@@ -431,11 +434,11 @@ int main(int argc, char* argv[]) {
 					sent_byte = send(s, packet, nc.pkt_size_inbyte, 0);
 					if (sent_byte < 0)
 					{
-#if(OSISWINDOWS==true)
-						printf("\n Send failed, error: %u\n", WSAGetLastError());
-#else
-						perror("\n Send failed.\n");
-#endif
+						#if(OSISWINDOWS==true)
+							printf("\n Send failed, error: %u\n", WSAGetLastError());
+						#else
+							perror("\n Send failed.\n");
+						#endif
 
 						break;
 					}
@@ -445,23 +448,23 @@ int main(int argc, char* argv[]) {
 				}
 				sendInfo(nc, starting_time, sent_pkt, total_sent_size);
 			}
-#if(OSISWINDOWS==true)
-			closesocket(s);
-#else
-			close(s);
-#endif
+			#if(OSISWINDOWS==true)
+				closesocket(s);
+			#else
+				close(s);
+			#endif
 		}
 		if (nc.mode == NETPROBE_RECV_MODE) {     //Receiving from IP
 			sockaddr_in client_addr;
 			int addr_len = sizeof(client_addr);
 			int client_addr_len = sizeof(sockaddr);
 
-#if(OSISWINDOWS==true)
-			getpeername(s, (struct sockaddr*) & client_addr, &addr_len);
-#else
-			unsigned int addr_len_linux = sizeof(client_addr);
-			getpeername(s, (struct sockaddr*) & client_addr, &addr_len_linux);
-#endif
+			#if(OSISWINDOWS==true)
+				getpeername(s, (struct sockaddr*) & client_addr, &addr_len);
+			#else
+				unsigned int addr_len_linux = sizeof(client_addr);
+				getpeername(s, (struct sockaddr*) & client_addr, &addr_len_linux);
+			#endif
 			char* recv_buf = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
 			int recv_size;
 			SOCKET client_socket;
@@ -482,13 +485,13 @@ int main(int argc, char* argv[]) {
 			while (true) {
 				if ((recv_size = recv(s, recv_buf, nc.pkt_size_inbyte, 0)) == SOCKET_ERROR)
 				{
-#if(OSISWINDOWS==true)
-					printf(" Recv Failed. %d\n", WSAGetLastError());
-					closesocket(s);
-#else
-					perror(" Recv Failed.\n");
-					close(s);
-#endif
+					#if(OSISWINDOWS==true)
+						printf(" Recv Failed. %d\n", WSAGetLastError());
+						closesocket(s);
+					#else
+						perror(" Recv Failed.\n");
+						close(s);
+					#endif
 					break;
 				}
 				clock_t recv_pkt_time = clock();
@@ -504,14 +507,14 @@ int main(int argc, char* argv[]) {
 				recvInfo(nc, starting_time, packet_num, 0, total_recv_size, mean_jitter_time);
 				ZeroMemory(recv_buf, sizeof(recv_buf));
 			}
-#if(OSISWINDOWS==true)
-			closesocket(s);
-#else
-			close(s);
-#endif
+				#if(OSISWINDOWS==true)
+					closesocket(s);
+				#else
+					close(s);
+				#endif
 		}
 	}
-#if (OSISWINDOWS==true)
-	WSACleanup();
-#endif
+	#if (OSISWINDOWS==true)
+		WSACleanup();
+	#endif
 }

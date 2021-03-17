@@ -1,17 +1,18 @@
 /*
-	NetProbe project 1
+	NetProbe project 3
 	@author : Wong Cho Hei
 	SID : 1155109484
 */
 
 // The default command for using this exe is
-// cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project2\Debug
+// cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project3\IERG4180-NetProbe-3\Debug
 // netprobe_server.exe [arguments]
 
-#include "../core.h"
+#include "../netprobe_core.h"
 
 using namespace std;
 
+//This is the function to handle all the client request using Select()
 void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 {
 	/// Step 1: Prepare address structures. ///
@@ -81,21 +82,21 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 		//tv.tv_usec = (*min_element(time_interval_ms + 2, time_interval_ms + maxSockets)) * 1000;
 		tv.tv_usec = 0;
 		if ((ret = select(topActiveSocket + 1, &fdReadSet, &fdWriteSet, NULL, &tv)) == SOCKET_ERROR) {
-#if(OSISWINDOWS==true)
-			printf("\n select() failed. Error code: %i\n", WSAGetLastError());
-#else
-			perror("\n select() failed.\n");
-#endif
+			#if(OSISWINDOWS==true)
+				printf("\n select() failed. Error code: %i\n", WSAGetLastError());
+			#else
+				perror("\n select() failed.\n");
+			#endif
 			return;
 		}
 		//setsockopt(socketHandles[1], SOL_SOCKET, SO_RCVTIMEO, (char *)&tv, sizeof(tv));
 		unsigned long int  noBlock = 1;
 
-#if(OSISWINDOWS==true)
-		ioctlsocket(socketHandles[1], FIONBIO, &noBlock);	//To set UDP as non-blocking mode
-#else
-		ioctl(socketHandles[1], FIONBIO, noBlock);
-#endif
+		#if(OSISWINDOWS==true)
+				ioctlsocket(socketHandles[1], FIONBIO, &noBlock);	//To set UDP as non-blocking mode
+		#else
+				ioctl(socketHandles[1], FIONBIO, noBlock);
+		#endif
 
 		// Process the active sockets //
 		for (i = 0; i < maxSockets; i++) {
@@ -130,11 +131,11 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 						--numActiveSockets;
 						if (numActiveSockets == (maxSockets - 1))
 							socketValid[0] = true;
-#if(OSISWINDOWS==true)
-						closesocket(socketHandles[i]);
-#else
-						close(socketHandles[i]);
-#endif
+						#if(OSISWINDOWS==true)
+							closesocket(socketHandles[i]);
+						#else
+							close(socketHandles[i]);
+						#endif
 					}
 				}
 			}
@@ -195,13 +196,12 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 					sockaddr_in si_other;    //The client socketaddr_in
 					slen = sizeof(si_other);
 
-#if(OSISWINDOWS==true)
-					if (ret != 0)
-						recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
-#else
-					unsigned int slen_linux = sizeof(si_other);
-					recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
-#endif
+					#if(OSISWINDOWS==true)
+						if (ret != 0) recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
+					#else
+						unsigned int slen_linux = sizeof(si_other);
+						recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
+					#endif
 
 					//printf(" Receiving from [%s:%d]:\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
 
@@ -223,12 +223,12 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 					int recv_size;
 					char* recv_buf = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
 
-#if(OSISWINDOWS==true)
-					getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen);
-#else
-					unsigned int namelen_linux = sizeof(sockaddr_in);
-					getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen_linux);
-#endif
+					#if(OSISWINDOWS==true)
+						getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen);
+					#else
+						unsigned int namelen_linux = sizeof(sockaddr_in);
+						getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen_linux);
+					#endif
 
 					char* client_ip = inet_ntoa(peerinfo[i].sin_addr);
 					int client_port = ntohs(peerinfo[i].sin_port);
@@ -255,11 +255,11 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 							//Set Send Buffer Size
 							if (setsockopt(socketHandles[i], SOL_SOCKET, SO_SNDBUF, (char*)(&nc[i].sbufsize_inbyte), sizeof(nc[i].sbufsize_inbyte)) < 0)
 							{
-#if(OSISWINDOWS==true)
-								printf("setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
-#else
-								perror(" setsockopt() for SO_KEEPALIVE failed.\n");
-#endif
+								#if(OSISWINDOWS==true)
+									printf("setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+								#else
+									perror(" setsockopt() for SO_KEEPALIVE failed.\n");
+								#endif
 								return;
 							}
 						}
@@ -276,11 +276,11 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 							--numActiveSockets;
 							if (numActiveSockets == (maxSockets - 1))
 								socketValid[0] = true;
-#if(OSISWINDOWS==true)
-							closesocket(socketHandles[i]);
-#else
-							close(socketHandles[i]);
-#endif
+							#if(OSISWINDOWS==true)
+								closesocket(socketHandles[i]);
+							#else
+								close(socketHandles[i]);
+							#endif
 						}
 					}
 				}
@@ -288,6 +288,11 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 			}
 		}
 	}
+}
+
+//This is the function to handle all the client request using ThreadPool
+void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
+	//TODO: LINUX version multithreading server is prioritised
 }
 
 int main(int argc, char* argv[])
@@ -305,84 +310,101 @@ int main(int argc, char* argv[])
 				usage_message_server();
 				return 0;
 			}
-			if (strcmp(argv[i], "-send") == 0) {
+			else if (strcmp(argv[i], "-send") == 0) {
 				nc.mode = 1;
 			}
-			if (strcmp(argv[i], "-recv") == 0) {
+			else if (strcmp(argv[i], "-recv") == 0) {
 				nc.mode = 2;
 			}
-			if (strcmp(argv[i], "-proto") == 0) {
+			else if (strcmp(argv[i], "-proto") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					if (strcmp(strlwr(argv[i + 1]), "udp") == 0) {
 						nc.protocol = 1;
 					}
-					if (strcmp(strlwr(argv[i + 1]), "tcp") == 0) {
+					else if (strcmp(strlwr(argv[i + 1]), "tcp") == 0) {
 						nc.protocol = 2;
 					}
 				}
 			}
-			if (strcmp(argv[i], "-pktsize") == 0) {
+			else if (strcmp(argv[i], "-pktsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_size_inbyte = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-pktrate") == 0) {
+			else if (strcmp(argv[i], "-pktrate") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_rate_bytepersec = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-pktnum") == 0) {
+			else if (strcmp(argv[i], "-pktnum") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.pkt_num = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-stat") == 0) {
+			else if (strcmp(argv[i], "-stat") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.stat_displayspeed_perms = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-sbufsize") == 0) {
+			else if (strcmp(argv[i], "-sbufsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.sbufsize_inbyte = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-lhost") == 0) {
+			else if (strcmp(argv[i], "-lhost") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.lhostname = argv[i + 1];
 				}
 			}
-			if (strcmp(argv[i], "-lport") == 0) {
+			else if (strcmp(argv[i], "-lport") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.lport = atoi(argv[i + 1]);
 				}
 			}
-			if (strcmp(argv[i], "-rbufsize") == 0) {
+			else if (strcmp(argv[i], "-rbufsize") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {
 					nc.rbufsize_inbyte = atoi(argv[i + 1]);
+				}
+			}
+			else if (strcmp(argv[i], "-servermodel") == 0) {
+				if (argv[i + 1] != NULL && argv[i + 1] != "") {
+					if (strcmp(strlwr(argv[i + 1]), "select") == 0 || atoi(argv[i + 1]) == 1) {
+						nc.server_model = 1;
+					}
+					else if (strcmp(strlwr(argv[i + 1]), "threadpool") == 0 || atoi(argv[i + 1]) == 2) {
+						nc.server_model = 2;
+					}
+				}
+			}
+			else if (strcmp(argv[i], "-poolsize") == 0) {
+				if (argv[i + 1] != NULL && argv[i + 1] != "") {
+					int temp_pool_size = atoi(argv[i + 1]);
+					if (temp_pool_size < 0) temp_pool_size = 0;
+					nc.rbufsize_inbyte = temp_pool_size;
 				}
 			}
 		}
 	}
 
-	nc.mode = 4;
-	nc.protocol = 3;
+	nc.mode = NETPROBE_SERV_PLACEHOLDER_MODE;
+	nc.protocol = NETPROBE_NULL_PROTO;
 
 	netProbeConfig_info(nc);
 
-#if (OSISWINDOWS == true)
-	WSADATA wsaData;    // For windows system socket startup
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		printf(" There are no useable winsock.dll\n");
-		printf(" Socket Initialisation failure. Error Code: %d.\n", WSAGetLastError());
-		return 1;
-	}
-#endif
+	#if (OSISWINDOWS == true)
+		WSADATA wsaData;    // For windows system socket startup
+		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+			printf(" There are no useable winsock.dll\n");
+			printf(" Socket Initialisation failure. Error Code: %d.\n", WSAGetLastError());
+			return 1;
+		}
+	#endif
 
 	ConcurrentListenerUsingSelect(intToString(nc.lport).c_str(), nc);
 
-#if (OSISWINDOWS == true)
-	WSACleanup();
-#endif
+	#if (OSISWINDOWS == true)
+		WSACleanup();
+	#endif
 
 	return 0;
 }

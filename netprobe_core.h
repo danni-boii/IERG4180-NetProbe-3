@@ -16,22 +16,31 @@
 #include <algorithm>    //min_element()
 #include <math.h>       //Ceil()
 
-#define DEFAULT_NCH "NCH:"
-#define DEFAULT_NCH_LEN 5 - 1
-#define DEFAULT_CONFIG_HEADER_SIZE 40 + DEFAULT_NCH_LEN   // 40+4 Bytes
+#include "tinycthread.h"
 
-#define NETPROBE_UDP_MODE 1
-#define NETPROBE_TCP_MODE 2
+#define DEFAULT_NCH "NCH:"                  //The default starting string of a NetprobeHeader
+#define DEFAULT_NCH_LEN 5 - 1               //The length of default starting string, do not use strlen() to replace this constant
+#define DEFAULT_CONFIG_HEADER_SIZE 40 + DEFAULT_NCH_LEN   // The size of NetprobeHeader is set to 40+4 Bytes
 
-#define NETPROBE_SEND_MODE 1
-#define NETPROBE_RECV_MODE 2
+#define NETPROBE_UDP_MODE 1                 //Netprobe UDP protocol
+#define NETPROBE_TCP_MODE 2                 //Netprobe TCP protocol
+#define NETPROBE_NULL_PROTO 3               //Placeholder netprobe protocol reserved for server use only
+
+#define NETPROBE_SEND_MODE 1                //Netprobe Sender mode
+#define NETPROBE_RECV_MODE 2                //Netprobe Receiver mode
+#define NETPROBE_HOST_MODE 3                //Depracted mode
+#define NETPROBE_SERV_PLACEHOLDER_MODE 4    //Placeholder netprobe mode reserved for server use only
+#define NETPROBE_RESP_MODE 5                //Netprobe Response mode
+
+#define NETPROBE_SERVMODEL_SELECT 1     //Using select() server model
+#define NETPROBE_SERVMODEL_THEDPL 2     //Using threadpool server model
 
 #if _WIN32
-    #define OSISWINDOWS true   // Assume there are only linux and windows os 
+    #define OSISWINDOWS true    // True when os is a windows system, false when it is a linux(Not 100% confirm)
     #include <winsock2.h>
     #pragma comment (lib, "ws2_32.lib")
 #else   //_Linux_ 
-    #define OSISWINDOWS false
+    #define OSISWINDOWS false   // True when os is a windows system, false when it is a linux(Not 100% confirm)
     #include <unistd.h>
     #include <arpa/inet.h>
     #include <sys/socket.h>
@@ -63,11 +72,13 @@ using namespace std;
 
 class NetProbeConfig {
 public:
-    int mode;   // send mode = 1, recv mode = 2, host mode = 3
+    int mode;   // send mode = 1, recv mode = 2, host mode = 3, 4 is reserved for server use, 5 is response mode
     int stat_displayspeed_perms;
     string rhostname;
     int rport;
-    int protocol; // Use UDP for default , 1 is UDP, 2 is TCP
+    int protocol; // Use UDP for default , 1 is UDP, 2 is TCP, 3 is reserved for server use
+    int server_model;   //Use Select() as default, 1 is Select(), 2 is threadpool
+    int poolsize;   //Only used for thread-pool server model.
     int pkt_size_inbyte;
     int pkt_rate_bytepersec; // "0" = as fast as possible
     int pkt_num; // Default "0" = infiinite
@@ -92,6 +103,8 @@ public:
         lport = 4180;
         rbufsize_inbyte = 0;
         hhostname = "localhost";
+        server_model = 1;
+        poolsize = 8;
     }
 };
 
@@ -163,13 +176,58 @@ int pkt_timeInterval(NetProbeConfig nc) {
     return time_interval_ms;
 }
 
+string ncModeConverttoString(int ncMode) {
+
+    string modestr = "";
+    switch (ncMode) {
+    case NETPROBE_SEND_MODE:
+        modestr = "SEND";
+        break;
+    case NETPROBE_RECV_MODE:
+        modestr = "RECV";
+        break;
+    case NETPROBE_HOST_MODE:
+        modestr = "HOST";
+        break;
+    case NETPROBE_SERV_PLACEHOLDER_MODE:
+        modestr = "SERVER";
+        break;
+    case NETPROBE_RESP_MODE:
+        modestr = "RESPONSE";
+        break;
+    default:
+        modestr = "ERROR";
+        break;
+    }
+    return modestr;
+}
+
+string ncProtoConverttoString(int ncProto) {
+
+    string protostr = "";
+    switch (ncProto) {
+    case NETPROBE_TCP_MODE:
+        protostr = "TCP";
+        break;
+    case NETPROBE_UDP_MODE:
+        protostr = "UDP";
+        break;
+    case NETPROBE_NULL_PROTO:
+        protostr = "BOTH";  //Or  protostr = "TCP/UDP";
+        break;
+    default:
+        protostr = "ERROR";
+        break;
+    }
+    return protostr;
+}
+
 //Print the netprobe config info
 void netProbeConfig_info(NetProbeConfig nc) {
-    string proto = "";
-    string mode = "";
+    string proto = ncProtoConverttoString(nc.protocol);
+    string mode = ncModeConverttoString(nc.mode);
     string lhost = "";
-    (nc.mode == 0) ? mode = "ERROR" : (nc.mode == 1) ? mode = "SEND" : (nc.mode == 2) ? mode = "RECV" : (nc.mode == 3) ? mode = "HOST" : (nc.mode == 4) ? mode = "SERVER" : mode = "NULL";
-    (nc.protocol == 1) ? proto = "UDP" : (nc.protocol == 2) ? proto = "TCP" : proto = "BOTH";
+    
     (nc.lhostname == "") ? lhost = "not specified" : lhost = nc.lhostname;
 
     cout << " NetProbe Configurations:\n";
@@ -186,27 +244,31 @@ void netProbeConfig_info(NetProbeConfig nc) {
     cout << "  -rport = " << nc.rport << endl;
 }
 
+//Print a connection message
 void netProbeConnectMessage(NetProbeConfig nc, const char* client_ip, int client_port) {
-    string proto = "";
-    string mode = "";
-    (nc.mode == 0) ? mode = "ERROR" : (nc.mode == 1) ? mode = "SEND" : (nc.mode == 2) ? mode = "RECV" : mode = "NULL";
-    (nc.protocol == 1) ? proto = "UDP" : proto = "TCP";
+    string proto = ncProtoConverttoString(nc.protocol);
+    string mode = ncModeConverttoString(nc.mode);
     cout << " Connected to [" << client_ip << "], port: " << client_port << ", " << mode << ", " << proto << ", " << nc.pkt_rate_bytepersec << " Bps" << endl;
 }
 
-//Print the help info for using netprobe
+//Print the help info for using netprobe_server
 void usage_message_server() {
     cout << " NetProbeServer <more parameters depended on mode>, see below:\n";
     cout << "    <-lhost hostname>   hostname to bind to. (Default late binding)\n";
     cout << "    <-lport portnum>    port number to bind to. (Default '4180')\n";
-    cout << "    <-rbufsize bsize>   set the incoming socket buffer size to bsize bytes.\n\n";
-    cout << "    <-sbufsize bsize>   set the outgoing socket buffer size to bsize bytes.\n";
+    cout << "    <-servermodel select|threadpool>   Server Model  (Default Select() )\n";
+    cout << "    <-poolsize psize>   The the thread pool size (Default 8, only valid in threadpool server model)\n";
+    cout << "    <-rbufsize bsize>   set the incoming socket buffer size to bsize bytes.\n";
+    cout << "    <-sbufsize bsize>   set the outgoing socket buffer size to bsize bytes.\n\n";
 }
+
+//Print the help info for using netprobe_client
 void usage_message_client() {
     cout << " NetProbeServer [mode] <more parameters depended on mode>, see below:\n";
     cout << " [mode]:   -send means sending mode;\n";
     cout << "           -recv means receiving mode;\n";
-    cout << " If [mode] = -send then the following are the supported parameters:\n";
+    cout << "           -resp means response mode;\n";
+    cout << " If [mode] = -send / -resp then the following are the supported parameters:\n";
     cout << "    <-stat yyy>         update statistics once every yyy ms. (Default = 500 ms)\n";
     cout << "    <-rhost hostname>   send data to host specified by hostname. (Default 'localhost')\n";
     cout << "    <-rport portnum>    send data to remote host at port number portnum. (Default '4180')\n";
@@ -223,6 +285,13 @@ void usage_message_client() {
     cout << "    <-proto tcp|udp>          send data using TCP or UDP. (Default UDP)\n";
     cout << "    <-pktsize bsize>    send message of bsize bytes. (Default 1000 bytes)\n";
     cout << "    <-rbufsize bsize>   set the incoming socket buffer size to bsize bytes.\n\n";
+}
+
+//Print the server threadpool related message
+void server_threadpool_message(NetProbeConfig nc) {
+    //TODO: Goal = "Elapsed [120s] ThreadPool [32|25] TCP Clients [10] UDP Clients [15]"
+    string proto = ncProtoConverttoString(nc.protocol);
+    string mode = ncModeConverttoString(nc.mode);
 }
 
 //Check the hostname and return an IPV4 dot address string
