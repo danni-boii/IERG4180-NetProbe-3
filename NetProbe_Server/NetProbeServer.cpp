@@ -8,11 +8,18 @@
 // cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project3\IERG4180-NetProbe-3\Debug
 // netprobe_server.exe [arguments]
 
+#include "../tinycthread.h""
+#include "../tinycthread_pool.h"
 #include "../netprobe_core.h"
 
 using namespace std;
+typedef struct threadpool_t threadpool_t;
 
-//This is the function to handle all the client request using Select()
+/**
+ * @brief This is the function to handle all the client request using Select()
+ * @param port - the main listening port
+ * @param npc - the server NetProbe config
+*/
 void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 {
 	/// Step 1: Prepare address structures. ///
@@ -63,7 +70,7 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 	fd_set fdWriteSet;
 
 	printf(" Socket Listening...\n");
-	while (1) {
+	InfinityLoop{
 		// Setup the fd_set
 		int topActiveSocket = 0;
 		int i = 0;
@@ -93,9 +100,9 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 		unsigned long int  noBlock = 1;
 
 		#if(OSISWINDOWS==true)
-				ioctlsocket(socketHandles[1], FIONBIO, &noBlock);	//To set UDP as non-blocking mode
+			ioctlsocket(socketHandles[1], FIONBIO, &noBlock);	//To set UDP as non-blocking mode
 		#else
-				ioctl(socketHandles[1], FIONBIO, noBlock);
+			ioctl(socketHandles[1], FIONBIO, noBlock);
 		#endif
 
 		// Process the active sockets //
@@ -290,9 +297,91 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 	}
 }
 
-//This is the function to handle all the client request using ThreadPool
+/**
+ * @brief This is the function to handle all the client request using ThreadPool
+ * @param port - the main listening port
+ * @param npc - the server NetProbe config
+*/
 void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
-	//TODO: LINUX version multithreading server is prioritised
+	/// Step 0: Create a threadpool
+	threadpool_t* thp = threadpool_create(npc.poolsize, 100, 0);
+	if (thp == NULL) {
+		printf("Error on creating threadpool.\n");
+		return;
+	}
+	threadpool_add(thp, AdminThread, (void*)thp, 0);
+
+	/// Step 1: Prepare address structures. ///
+	sockaddr_in* SER_Addr = new sockaddr_in;
+	memset(SER_Addr, 0, sizeof(struct sockaddr_in));
+	SER_Addr->sin_family = AF_INET;
+	SER_Addr->sin_port = htons(atoi(port));
+	SER_Addr->sin_addr.s_addr = INADDR_ANY;
+
+	/// Step 2: Create a socket for incoming connections. ///
+	SOCKET Sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	bind(Sockfd, (sockaddr*)SER_Addr, sizeof(sockaddr_in));
+	listen(Sockfd, 5);
+
+	printf("\n TCP Listen Socket created.\n");
+
+	//Create the UDP socket
+	SOCKET UDPfd = socket(AF_INET, SOCK_DGRAM, 0);
+	bind(UDPfd, (sockaddr*)SER_Addr, sizeof(sockaddr_in));
+
+	printf(" UDP Socket created.\n");
+
+	InfinityLoop{
+		int len = 0;
+		int client_sock = accept(Sockfd, (sockaddr*)&SER_Addr, &len);     //accept
+		thrd_t thread_id;
+		if (client_sock < 0)
+		{
+			printf("Error on accept()\n");
+			return;
+		}
+		threadpool_add(thp, RequestHandler_thread, (void*)client_sock, 0);
+	}
+	#if OSISWINDOWS == true
+		threadpool_destroy(thp, 0);
+		closesocket(Sockfd);
+	#else
+		close(Sockfd);
+	#endif
+}
+
+void RequestHandler_thread(void* arg) {
+	int client_sock = (int)arg;
+	InfinityLoop{
+		char buf[1024];
+		int recv_size = 0;
+		ZeroMemory(buf, sizeof(buf));
+		if ((recv_size = recv(client_sock, buf, sizeof(buf), 0)) == SOCKET_ERROR) {
+			#if(OSISWINDOWS==true)
+				printf(" Recv Failed. %d\n", WSAGetLastError());
+				closesocket(client_sock);
+			#else
+				perror(" Recv Failed.\n");
+				close(client_sock);
+			#endif
+		}
+		//TODO:
+	}
+	#if OSISWINDOWS == true
+		closesocket(client_sock);
+	#else
+		close(client_sock);
+	#endif
+	return;
+}
+
+void AdminThread(void* threadpool) {
+	threadpool_t* pool = (threadpool_t*)threadpool;
+	while (pool->shutdown == 0) {
+		//Pause the thread for a while
+		timespec sleep_time; sleep_time.tv_sec = 1; thrd_sleep(&sleep_time, NULL);
+		//TODO: set the thread size to half after 60secs of 50% lower usage.
+	}
 }
 
 int main(int argc, char* argv[])
@@ -388,6 +477,9 @@ int main(int argc, char* argv[])
 
 	nc.mode = NETPROBE_SERV_PLACEHOLDER_MODE;
 	nc.protocol = NETPROBE_NULL_PROTO;
+	//test the multithread mode
+	nc.server_model = NETPROBE_SERVMODEL_THEDPL;
+	nc.poolsize = 8;
 
 	netProbeConfig_info(nc);
 

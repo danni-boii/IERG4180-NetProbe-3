@@ -288,7 +288,7 @@ int cnd_signal(cnd_t *cond);
 int cnd_broadcast(cnd_t *cond);
 
 /** Wait for a condition variable to become signaled.
-* The function atomically unlocks the given mutex and endeavors to block until
+* The function automically unlocks the given mutex and endeavors to block until
 * the given condition variable is signaled by a call to cnd_signal or to
 * cnd_broadcast. When the calling thread becomes unblocked it locks the mutex
 * before it returns.
@@ -300,7 +300,7 @@ int cnd_broadcast(cnd_t *cond);
 int cnd_wait(cnd_t *cond, mtx_t *mtx);
 
 /** Wait for a condition variable to become signaled.
-* The function atomically unlocks the given mutex and endeavors to block until
+* The function automically unlocks the given mutex and endeavors to block until
 * the given condition variable is signaled by a call to cnd_signal or to
 * cnd_broadcast, or until after the specified time. When the calling thread
 * becomes unblocked it locks the mutex before it returns.

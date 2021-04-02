@@ -16,11 +16,9 @@
 #include <algorithm>    //min_element()
 #include <math.h>       //Ceil()
 
-#include "tinycthread.h"
-
 #define DEFAULT_NCH "NCH:"                  //The default starting string of a NetprobeHeader
 #define DEFAULT_NCH_LEN 5 - 1               //The length of default starting string, do not use strlen() to replace this constant
-#define DEFAULT_CONFIG_HEADER_SIZE 40 + DEFAULT_NCH_LEN   // The size of NetprobeHeader is set to 40+4 Bytes
+#define DEFAULT_CONFIG_HEADER_SIZE 45 + DEFAULT_NCH_LEN   // The size of NetprobeHeader is set to 45+4 Bytes
 
 #define NETPROBE_UDP_MODE 1                 //Netprobe UDP protocol
 #define NETPROBE_TCP_MODE 2                 //Netprobe TCP protocol
@@ -34,6 +32,8 @@
 
 #define NETPROBE_SERVMODEL_SELECT 1     //Using select() server model
 #define NETPROBE_SERVMODEL_THEDPL 2     //Using threadpool server model
+
+#define InfinityLoop while(1)           //Same as while(1)/for(;;) , just a nicer name.
 
 #if _WIN32
     #define OSISWINDOWS true    // True when os is a windows system, false when it is a linux(Not 100% confirm)
@@ -49,7 +49,8 @@
     #include <netinet/in.h>
     #include <netdb.h>
     #include <stdlib.h> //exit(0);
-    #define ZeroMemory(Destination,Length) memset((Destination),0,(Length))
+    #include <sched.h>      //Scheduling API
+    #define ZeroMemory(Destination,Length) memset((Destination),0,(Length))  //The easier memset 0 method inheritanced from windows c++
     #define SOCKET_ERROR -1
     #define INVALID_SOCKET ~0
     typedef int SOCKET;
@@ -70,6 +71,9 @@
 
 using namespace std;
 
+/**
+ * @brief The configuartion of an NetProbe object
+*/
 class NetProbeConfig {
 public:
     int mode;   // send mode = 1, recv mode = 2, host mode = 3, 4 is reserved for server use, 5 is response mode
@@ -78,7 +82,7 @@ public:
     int rport;
     int protocol; // Use UDP for default , 1 is UDP, 2 is TCP, 3 is reserved for server use
     int server_model;   //Use Select() as default, 1 is Select(), 2 is threadpool
-    int poolsize;   //Only used for thread-pool server model.
+    int poolsize;   //Only used for thread-pool server model.   //maximum is 9999 since we pass it as a 4 digits string
     int pkt_size_inbyte;
     int pkt_rate_bytepersec; // "0" = as fast as possible
     int pkt_num; // Default "0" = infiinite
@@ -108,20 +112,34 @@ public:
     }
 };
 
-//Convert some int value into a string
+/**
+ * @brief Convert some int value into a string
+ * @param int value
+ * @return string
+*/
 string intToString(int value) {
     ostringstream strs;
     strs << value;
     return strs.str();
 }
 
-//Prepend the character before the string
+/**
+ * @brief Prepend the character before the string (default to prepend a digit 0)
+ * @param str - the target string
+ * @param totallength - the total length of the result
+ * @param ch - the prepend character
+ * @return string
+*/
 string string_prependZero(string str, int totallength, char ch = '0') {
     string new_str = string(totallength - str.size(), ch) + str;
     return new_str;
 }
 
-//Build and return a 32bit netprobe_info in string
+/**
+ * @brief Build and return a [DEFAULT_CONFIG_HEADER_SIZE] bytes netprobe_info in string
+ * @param nc - the source netprobe config
+ * @return string
+*/
 string NH_builder(NetProbeConfig nc) {
     string mode = intToString(nc.mode);
     string proto = intToString(nc.protocol);
@@ -129,13 +147,21 @@ string NH_builder(NetProbeConfig nc) {
     string pktsize = string_prependZero(intToString(nc.pkt_size_inbyte), 10);
     string pktrate = string_prependZero(intToString(nc.pkt_rate_bytepersec), 10);
     string lport = string_prependZero(intToString(nc.lport), 8);
+    string servmodel = intToString(nc.server_model);
+    string poolsize = string_prependZero(intToString(nc.poolsize),4);
 
-    string builder = DEFAULT_NCH + mode + proto + pktnum + pktsize + pktrate + lport + "\0";
+    //Then the DEFAULT_CONFIG_HEADER_SIZE should be 1 + 1 + 10 + 10 + 10 + 8 + 1 + 4
+
+    string builder = DEFAULT_NCH + mode + proto + pktnum + pktsize + pktrate + lport + servmodel + poolsize + "\0";
     //cout << "Builder = " << builder << endl;
     return builder;
 }
 
-//This function return a NetProbeConfig object by rebuilding one using info received from the client
+/**
+ * @brief This function return a NetProbeConfig object by rebuilding one using info received from the client
+ * @param NH_str - the string built by NH_builder() and received from the client
+ * @param nc - the rebuild netprobe config target
+*/
 void rebuildFromNHBuilder(char* NH_str, NetProbeConfig* nc) {
     char buf[DEFAULT_CONFIG_HEADER_SIZE];
     memcpy(buf, NH_str, DEFAULT_CONFIG_HEADER_SIZE);
@@ -161,9 +187,19 @@ void rebuildFromNHBuilder(char* NH_str, NetProbeConfig* nc) {
     memcpy(temp_sub_buf, &buf[32 + DEFAULT_NCH_LEN], 8);
     temp_sub_buf[8] = '\0';
     nc->lport = atoi(temp_sub_buf);
+    memcpy(temp_sub_buf, &buf[40 + DEFAULT_NCH_LEN], 1);
+    temp_sub_buf[1] = '\0';
+    nc->server_model = atoi(temp_sub_buf);
+    memcpy(temp_sub_buf, &buf[41 + DEFAULT_NCH_LEN], 4);
+    temp_sub_buf[4] = '\0';
+    nc->poolsize = atoi(temp_sub_buf);
 }
 
-//This function calculate the time interval between sending each packet
+/**
+ * @brief This function calculate the time interval between sending each packet
+ * @param nc - the current netprobe config
+ * @return int - time interval in ms
+*/
 int pkt_timeInterval(NetProbeConfig nc) {
     int time_interval_ms;
     if (nc.pkt_rate_bytepersec > 0) {
@@ -176,6 +212,11 @@ int pkt_timeInterval(NetProbeConfig nc) {
     return time_interval_ms;
 }
 
+/**
+ * @brief Convert a predefined ncMode name into a string
+ * @param ncMode - the mode that needed to convert
+ * @return string - the full name of the ncMode
+*/
 string ncModeConverttoString(int ncMode) {
 
     string modestr = "";
@@ -202,6 +243,11 @@ string ncModeConverttoString(int ncMode) {
     return modestr;
 }
 
+/**
+ * @brief Convert a predefined ncProto name into a string
+ * @param ncProto - the mode that needed to convert
+ * @return string - the full name of the ncProto
+*/
 string ncProtoConverttoString(int ncProto) {
 
     string protostr = "";
@@ -287,14 +333,11 @@ void usage_message_client() {
     cout << "    <-rbufsize bsize>   set the incoming socket buffer size to bsize bytes.\n\n";
 }
 
-//Print the server threadpool related message
-void server_threadpool_message(NetProbeConfig nc) {
-    //TODO: Goal = "Elapsed [120s] ThreadPool [32|25] TCP Clients [10] UDP Clients [15]"
-    string proto = ncProtoConverttoString(nc.protocol);
-    string mode = ncModeConverttoString(nc.mode);
-}
-
-//Check the hostname and return an IPV4 dot address string
+/**
+ * @brief Check the hostname and return an IPV4 dot address string
+ * @param hostname
+ * @return string - Empty string (Invalid hostname) | IPV4 address
+*/
 string hostnametoIPV4(string hostname) {
     unsigned long ipaddr = inet_addr(hostname.c_str());
     struct hostent* pHost = NULL;
@@ -322,7 +365,11 @@ string hostnametoIPV4(string hostname) {
     return returner;
 }
 
-//Convert the bytes into bps string format and print it directly
+/**
+ * @brief Convert the bytes into bps string format and print it directly
+ * @param bytes - The total tranfered bytes
+ * @param now_time_safe - The total time duration ( > 0 )
+*/
 void bytesTobps(long bytes, clock_t now_time_safe) {
     double thoughput = ((double)bytes * 8) / (now_time_safe);
     string bps;
@@ -350,6 +397,7 @@ void bytesTobps(long bytes, clock_t now_time_safe) {
 }
 
 /// Statistics Display ///
+
 void recvInfo(NetProbeConfig nc, clock_t starting_time, long recved_pkt, long lost_pkt, double total_recv_size, double jitter) {
     //cout << " Debug, clock is now : " << clock() << ", nc_stat is : " << nc.stat_displayspeed_perms << endl;
     static int last_show_var = 0;
@@ -383,8 +431,30 @@ void sendInfo(NetProbeConfig nc, clock_t starting_time, long sent_pkt, long tota
     }
 }
 
-// Send a NH builder pkt to the server and receive the response
-// Return 0 if success
+//Print the response message for server
+void response_message_server(NetProbeConfig nc) {
+    //TODO: Goal = "Elapsed [120s] ThreadPool [32|25] TCP Clients [10] UDP Clients [15]"
+    string proto = ncProtoConverttoString(nc.protocol);
+    string mode = ncModeConverttoString(nc.mode);
+
+    //printf("\r Response: Elapsed [%ds] ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]");
+}
+
+//Print the response message for client
+void response_message_client(NetProbeConfig nc) {
+    //TODO: Goal = "Elapsed [120s] Replies [1234] Min [4.3ms] Max [10.2ms] Avg [8.0ms] Jitter [5.2ms]"
+    string proto = ncProtoConverttoString(nc.protocol);
+    string mode = ncModeConverttoString(nc.mode);
+
+    //printf("\r Response: Elapsed [%ds] Replies [%d] Min [%.2f] ax [%.2fms] Avg [%.2fs] Jitter [%.2fms]");
+}
+
+/**
+ * @brief Send a NH builder pkt to the server and receive the response
+ * @param nc - The netprobe config to tranfer
+ * @param s - The TCP socket to the server
+ * @return 0 ( Success case ) | 1 ( Send Failed ) | 2 ( Receive Failed )
+*/
 int sendNCbuildMessage(NetProbeConfig nc, SOCKET s) {
     char send_buf[DEFAULT_CONFIG_HEADER_SIZE];
     char recv_buf[DEFAULT_CONFIG_HEADER_SIZE];
@@ -401,5 +471,7 @@ int sendNCbuildMessage(NetProbeConfig nc, SOCKET s) {
     }
     return 0;
 }
+
+
 
 #endif
