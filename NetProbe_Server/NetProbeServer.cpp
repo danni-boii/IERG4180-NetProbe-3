@@ -8,7 +8,7 @@
 // cd C:\Users\Danny Boy\Documents\GitHub\IERG4180_Project3\IERG4180-NetProbe-3\Debug
 // netprobe_server.exe [arguments]
 
-#include "../tinycthread.h""
+#include "../tinycthread.h"
 #include "../tinycthread_pool.h"
 #include "../netprobe_core.h"
 
@@ -352,27 +352,81 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 
 void RequestHandler_thread(void* arg) {
 	int client_sock = (int)arg;
-	InfinityLoop{
-		char buf[1024];
-		int recv_size = 0;
-		ZeroMemory(buf, sizeof(buf));
-		if ((recv_size = recv(client_sock, buf, sizeof(buf), 0)) == SOCKET_ERROR) {
-			#if(OSISWINDOWS==true)
-				printf(" Recv Failed. %d\n", WSAGetLastError());
-				closesocket(client_sock);
-			#else
-				perror(" Recv Failed.\n");
-				close(client_sock);
-			#endif
-		}
-		//TODO:
-	}
-	#if OSISWINDOWS == true
-		closesocket(client_sock);
+
+	NetProbeConfig nc;
+	int recv_size;
+	char* recv_buf = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
+
+	sockaddr_in peerinfo;
+	int namelen = sizeof(sockaddr_in);
+	#if(OSISWINDOWS==true)
+		getpeername(client_sock, (sockaddr*)&peerinfo, &namelen);
 	#else
-		close(client_sock);
+		unsigned int namelen_linux = sizeof(sockaddr_in);
+		getpeername(socketHandles[i], (sockaddr*)&peerinfo, &namelen_linux);
 	#endif
-	return;
+
+	char* client_ip = inet_ntoa(peerinfo.sin_addr);
+	int client_port = ntohs(peerinfo.sin_port);
+	long packet_num = 0;
+	bool isNotifyMessage = false;
+	char first4char[5];
+
+	ZeroMemory(recv_buf, sizeof(recv_buf));
+	recv_size = recv(client_sock, recv_buf, nc.pkt_size_inbyte, 0);
+
+	if (recv_size != 0) {
+		memcpy(first4char, recv_buf, DEFAULT_NCH_LEN);
+		first4char[4] = '\0';
+		if (strcmp(first4char, DEFAULT_NCH) == 0) { //Check for a nc header packet
+			rebuildFromNHBuilder(recv_buf, &nc);
+			isNotifyMessage = true;
+			netProbeConnectMessage(nc, client_ip, client_port);
+			send(client_sock, recv_buf, DEFAULT_CONFIG_HEADER_SIZE, 0);
+
+			if (nc.sbufsize_inbyte <= 0) {
+				nc.sbufsize_inbyte = 65536;
+			}
+			if (nc.rbufsize_inbyte <= 0) {
+				nc.rbufsize_inbyte = 65536;
+			}
+			//Set Send Buffer Size
+			if (setsockopt(client_sock, SOL_SOCKET, SO_SNDBUF, (char*)(&nc.sbufsize_inbyte), sizeof(nc.sbufsize_inbyte)) < 0)
+			{
+			#if(OSISWINDOWS==true)
+				printf("setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+			#else
+				perror(" setsockopt() for SO_KEEPALIVE failed.\n");
+			#endif
+				return;
+			}
+		}
+		ZeroMemory(recv_buf, sizeof(recv_buf));
+		free(recv_buf);
+		#if OSISWINDOWS == true
+			closesocket(client_sock);
+		#else
+			close(client_sock);
+		#endif
+	}
+	else {
+		#if(OSISWINDOWS==true)
+			printf(" Recv Failed. %d\n", WSAGetLastError());
+			closesocket(client_sock);
+		#else
+			perror(" Recv Failed.\n");
+			close(client_sock);
+		#endif
+	}
+
+	/**
+	* The NetProbe Config Initalization is done.
+	* 
+	* Do the real work load here
+	*/
+	InfinityLoop{
+
+	}
 }
 
 void AdminThread(void* threadpool) {
