@@ -28,9 +28,9 @@ Thank you for the contribution for this project
 > 
 > The common header file is located at `\IERG4180-NetProbe-3\core.h`
 
-To run the executable file
+To run the programme
 
-> Go in to the folder containing the exe file `cd \IERG4180-NetProbe-3\Debug`
+> Go into the folder containing the exe file `cd \IERG4180-NetProbe-3\Debug`
 >
 > run exe with arguments `netprobe_client.exe -send -proto tcp`
 >
@@ -46,9 +46,14 @@ To run the executable file
 > - \core.h
 > - \makefile
 > 
-> `make all` to compile the executable files
+> Go into the downloaded folder `cd /IERG4180-NetProbe-3`
+>
+> type `make all` to compile the executable files
 > 
 > The executable files are compiled as 'netprobecli' (Client) and 'netprobesrv' (Server)
+
+To run the programme
+
 >
 > Go in to the folder containing the executables `cd /IERG4180-NetProbe-3/Debug`
 >
