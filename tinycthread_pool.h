@@ -43,6 +43,7 @@ extern "C" {
      * Large values might slow down your system
      */
 #define MAX_THREADS 64
+#define MIN_THREADS 2   // 1 For admin thread and 1 for real processing
 #define MAX_QUEUE 65536
 
      /**
@@ -63,7 +64,6 @@ extern "C" {
      *
      */
     typedef struct threadpool_t {
-        
         mtx_t lock;
         mtx_t thread_lock;            //Lock used when using busy threads
         cnd_t notify;                 //Condition variable to notify worker threads.
@@ -77,6 +77,7 @@ extern "C" {
         int shutdown;                 //Flag indicating if the pool is shutting down
         int started;                  //Number of started threads
         int busy_thread;              //Number of operating threads that are busy
+
     } threadpool_t;
 
     typedef enum {

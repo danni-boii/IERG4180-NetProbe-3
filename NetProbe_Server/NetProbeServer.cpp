@@ -16,6 +16,21 @@ using namespace std;
 typedef struct threadpool_t threadpool_t;
 
 /**
+* This structure is only used for the tinycthread_pool related function 
+* since they do not support passing multiple arguments to the thread easily.
+* 
+* @brief A compact structre to pass multiple datatype to threadpool function.
+* 
+*/
+typedef struct socketWithMtx {
+	SOCKET s;
+	mtx_t lock;
+}socketWithMtx;
+
+int TCP_connetion_counter = 0;	//The total TCP connection of the server.
+int UDP_connetion_counter = 0;	//The total UDP connection of the server.
+
+/**
  * @brief This is the function to handle all the client request using Select()
  * @param port - the main listening port
  * @param npc - the server NetProbe config
@@ -137,12 +152,10 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 						last_show_var[i] = 0;
 						--numActiveSockets;
 						if (numActiveSockets == (maxSockets - 1))
+						{
 							socketValid[0] = true;
-						#if(OSISWINDOWS==true)
-							closesocket(socketHandles[i]);
-						#else
-							close(socketHandles[i]);
-						#endif
+						}
+						closesocket_comp(socketHandles[i]);
 					}
 				}
 			}
@@ -281,13 +294,10 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 							socketValid[i] = false;
 							nc[i] = NetProbeConfig();
 							--numActiveSockets;
-							if (numActiveSockets == (maxSockets - 1))
+							if (numActiveSockets == (maxSockets - 1)) {
 								socketValid[0] = true;
-							#if(OSISWINDOWS==true)
-								closesocket(socketHandles[i]);
-							#else
-								close(socketHandles[i]);
-							#endif
+							}
+							closesocket_comp(socketHandles[i]);
 						}
 					}
 				}
@@ -340,18 +350,21 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 			printf("Error on accept()\n");
 			return;
 		}
-		threadpool_add(thp, RequestHandler_thread, (void*)client_sock, 0);
+		socketWithMtx* swm;
+		mtx_t lock;
+		mtx_init(&lock, NULL);
+		swm->s = client_sock;
+		swm->lock = lock;
+		threadpool_add(thp, RequestHandler_thread, (void*)swm,  0);
 	}
-	#if OSISWINDOWS == true
-		threadpool_destroy(thp, 0);
-		closesocket(Sockfd);
-	#else
-		close(Sockfd);
-	#endif
+	threadpool_destroy(thp, 0);
+	closesocket_comp(Sockfd);
 }
 
 void RequestHandler_thread(void* arg) {
-	int client_sock = (int)arg;
+	socketWithMtx* swm = (socketWithMtx*)arg;
+	int client_sock = swm->s;
+	mtx_t thread_lock = swm->lock;
 
 	NetProbeConfig nc;
 	int recv_size;
@@ -368,12 +381,16 @@ void RequestHandler_thread(void* arg) {
 
 	char* client_ip = inet_ntoa(peerinfo.sin_addr);
 	int client_port = ntohs(peerinfo.sin_port);
-	long packet_num = 0;
 	bool isNotifyMessage = false;
 	char first4char[5];
 
 	ZeroMemory(recv_buf, sizeof(recv_buf));
+	free(recv_buf);
 	recv_size = recv(client_sock, recv_buf, nc.pkt_size_inbyte, 0);
+
+	/**
+	 * Rebuild the netprobe config from the incoming packet
+	*/
 
 	if (recv_size != 0) {
 		memcpy(first4char, recv_buf, DEFAULT_NCH_LEN);
@@ -403,20 +420,10 @@ void RequestHandler_thread(void* arg) {
 		}
 		ZeroMemory(recv_buf, sizeof(recv_buf));
 		free(recv_buf);
-		#if OSISWINDOWS == true
-			closesocket(client_sock);
-		#else
-			close(client_sock);
-		#endif
+		closesocket_comp(client_sock);
 	}
 	else {
-		#if(OSISWINDOWS==true)
-			printf(" Recv Failed. %d\n", WSAGetLastError());
-			closesocket(client_sock);
-		#else
-			perror(" Recv Failed.\n");
-			close(client_sock);
-		#endif
+		closesocket_comp(client_sock);
 	}
 
 	/**
@@ -424,16 +431,167 @@ void RequestHandler_thread(void* arg) {
 	* 
 	* Do the real work load here
 	*/
-	InfinityLoop{
 
+	int time_interval_ms = 0;
+	int last_show_var = 0;
+	long sent_pkt = { 0 };
+	char* packet_num = (char*)malloc(((sizeof(sent_pkt) * CHAR_BIT) + 2) / 3 + 2);
+
+	if (nc.protocol == NETPROBE_TCP_MODE) {
+		mtx_lock(&(thread_lock));
+		TCP_connetion_counter++;
+		mtx_unlock(&thread_lock);
+		if (nc.mode == NETPROBE_SEND_MODE) {
+			InfinityLoop{
+				char* recv_buf = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
+				recv_size = recv(client_sock, recv_buf, nc.pkt_size_inbyte, 0);
+				//printf(" Received message len: %s\n", recv_buf);
+				if (recv_size != 0) {
+					ZeroMemory(recv_buf, sizeof(recv_buf));
+					free(recv_buf);
+				}
+				else {// (recv_size == 0)  // connection closed
+					cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
+					closesocket_comp(client_sock);
+					break;
+				}
+			}
+		}
+		else if (nc.mode == NETPROBE_RECV_MODE) {
+			//The client is in receive mode, so we need to send the data
+			InfinityLoop{
+				time_interval_ms = pkt_timeInterval(nc);
+				if ((clock() / time_interval_ms) > last_show_var) {
+					last_show_var = clock() / time_interval_ms;
+					char* packet = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
+					strncpy(packet, "sending_pkt_num= ", 18);
+					sprintf(packet_num, "%ld ", sent_pkt);
+					strcat(packet, packet_num);
+
+					//Send the packet to the client
+					int sent_byte = send(client_sock, packet, nc.pkt_size_inbyte, 0);
+					//cout << " A packet sent, pkt_num = " << sent_pkt[i] << endl;
+
+					ZeroMemory(packet, sizeof(packet));
+					free(packet);
+					sent_pkt++;
+
+					if (sent_byte <= 0 || (sent_pkt > nc.pkt_num && nc.pkt_num != 0))  //If the client is disconnected or error
+					{
+						cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
+						closesocket_comp(client_sock);
+						break;
+					}
+				}
+			}
+		}
+		else if (nc.mode == NETPROBE_RESP_MODE) {
+			InfinityLoop{
+
+			}
+		}
+		mtx_lock(&(thread_lock));
+		TCP_connetion_counter--;
+		mtx_unlock(&thread_lock);
+		return;
 	}
+	else if (nc.protocol == NETPROBE_UDP_MODE) {
+		mtx_lock(&(thread_lock));
+		UDP_connetion_counter++;
+		mtx_unlock(&thread_lock);
+		if (nc.mode == NETPROBE_SEND_MODE) {
+			int recv_len;
+			char* buf = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
+			sockaddr_in si_other;    //The client socketaddr_in
+			int slen = sizeof(si_other);
+			unsigned int slen_linux = sizeof(si_other);
+			InfinityLoop{
+				#if(OSISWINDOWS==true)
+					recv_len = recvfrom(client_sock, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
+				#else
+					recv_len = recvfrom(client_sock, buf, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
+				#endif
+
+				//printf(" Receiving from [%s:%d]:\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+
+				ZeroMemory(buf, sizeof(buf));
+				free(buf);
+
+				if(recv_len <= 0)	//Error occurs
+				{
+					cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
+					closesocket_comp(client_sock);
+					break;
+				}
+			}
+		}
+		else if (nc.mode == NETPROBE_RECV_MODE) {
+			struct sockaddr_in si_other;
+			si_other.sin_family = AF_INET;
+			si_other.sin_port = htons((short)nc.lport);
+			char* client_ip = inet_ntoa(peerinfo.sin_addr);
+			si_other.sin_addr.s_addr = inet_addr(client_ip);
+			time_interval_ms = pkt_timeInterval(nc);
+			InfinityLoop{
+				if ((clock() / time_interval_ms) > last_show_var) {
+					last_show_var = clock() / time_interval_ms;
+					char* message = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
+					strcpy(message, "send_pkt_num= ");
+					sprintf(packet_num, "%ld", sent_pkt);
+					strcat(message, packet_num);
+
+					//send the message
+
+					int sendto_size = sendto(client_sock, message, nc.pkt_size_inbyte, 0, (struct sockaddr*)&si_other, sizeof(si_other));
+
+					//cout << " Sendto " << client_ip << ", port: " << nc.lport << endl;	//Debug
+					ZeroMemory(message, sizeof(message));
+					free(message);
+					sent_pkt++;
+					if ((sent_pkt >= nc.pkt_num && nc.pkt_num != 0) || sendto_size <= SOCKET_ERROR) {
+						cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
+						closesocket_comp(client_sock);
+						break;
+					}
+				}
+			}
+		}
+		else if (nc.mode == NETPROBE_RESP_MODE) {
+			InfinityLoop{
+
+			}
+		}
+		mtx_lock(&(thread_lock));
+		UDP_connetion_counter--;
+		mtx_unlock(&thread_lock);
+		return;
+	}
+	return;
 }
 
 void AdminThread(void* threadpool) {
 	threadpool_t* pool = (threadpool_t*)threadpool;
+	timespec sleep_time; sleep_time.tv_sec = 1;
+	clock_t adminclock = clock();
 	while (pool->shutdown == 0) {
 		//Pause the thread for a while
-		timespec sleep_time; sleep_time.tv_sec = 1; thrd_sleep(&sleep_time, NULL);
+		thrd_sleep(&sleep_time, NULL);
+		if (((float)pool->busy_thread / pool->thread_count) < 0.5) {
+			if (clock() > adminclock) {
+				if (((clock() - adminclock) / CLOCKS_PER_SEC) >= 60) {
+					if ((pool->thread_count / 2) >= MIN_THREADS) {
+						pool->thread_count /= 2;
+					}
+					else {
+						pool->thread_count = 2;
+					}
+					adminclock = clock();
+				}
+			}
+			else {
+				adminclock = clock();
+			}
+		}
 		//TODO: set the thread size to half after 60secs of 50% lower usage.
 	}
 }
@@ -452,37 +610,6 @@ int main(int argc, char* argv[])
 			if (strcmp(argv[i], "-help") == 0) {
 				usage_message_server();
 				return 0;
-			}
-			else if (strcmp(argv[i], "-send") == 0) {
-				nc.mode = 1;
-			}
-			else if (strcmp(argv[i], "-recv") == 0) {
-				nc.mode = 2;
-			}
-			else if (strcmp(argv[i], "-proto") == 0) {
-				if (argv[i + 1] != NULL && argv[i + 1] != "") {
-					if (strcmp(strlwr(argv[i + 1]), "udp") == 0) {
-						nc.protocol = 1;
-					}
-					else if (strcmp(strlwr(argv[i + 1]), "tcp") == 0) {
-						nc.protocol = 2;
-					}
-				}
-			}
-			else if (strcmp(argv[i], "-pktsize") == 0) {
-				if (argv[i + 1] != NULL && argv[i + 1] != "") {
-					nc.pkt_size_inbyte = atoi(argv[i + 1]);
-				}
-			}
-			else if (strcmp(argv[i], "-pktrate") == 0) {
-				if (argv[i + 1] != NULL && argv[i + 1] != "") {
-					nc.pkt_rate_bytepersec = atoi(argv[i + 1]);
-				}
-			}
-			else if (strcmp(argv[i], "-pktnum") == 0) {
-				if (argv[i + 1] != NULL && argv[i + 1] != "") {
-					nc.pkt_num = atoi(argv[i + 1]);
-				}
 			}
 			else if (strcmp(argv[i], "-stat") == 0) {
 				if (argv[i + 1] != NULL && argv[i + 1] != "") {

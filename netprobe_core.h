@@ -16,8 +16,14 @@
 #include <algorithm>    //min_element()
 #include <math.h>       //Ceil()
 
+/*
+* If [DEFAULT_NCH] is being modified,
+* [DEFAULT_NCH_LEN] should also change
+*/
 #define DEFAULT_NCH "NCH:"                  //The default starting string of a NetprobeHeader
-#define DEFAULT_NCH_LEN 5 - 1               //The length of default starting string, do not use strlen() to replace this constant
+#define DEFAULT_NCH_LEN 5 - 1               //The length of default starting string, do not use strlen() to replace this constant 
+                                            //Actually, we can use [constexpr] to calcuate the len at the compile stage (C11 features)
+
 #define DEFAULT_CONFIG_HEADER_SIZE 45 + DEFAULT_NCH_LEN   // The size of NetprobeHeader is set to 45+4 Bytes
 
 #define NETPROBE_UDP_MODE 1                 //Netprobe UDP protocol
@@ -98,7 +104,7 @@ public:
         stat_displayspeed_perms = 500;
         rhostname = "localhost";
         rport = 4180;
-        protocol = 2;
+        protocol = NETPROBE_TCP_MODE;
         pkt_size_inbyte = 1000;
         pkt_rate_bytepersec = 1000;
         pkt_num = 0;
@@ -472,6 +478,16 @@ int sendNCbuildMessage(NetProbeConfig nc, SOCKET s) {
     return 0;
 }
 
-
+/**
+ * @brief A multiplatform version of close socket
+ * @param s - Close this socket
+*/
+void closesocket_comp(SOCKET s) {
+    #if(OSISWINDOWS==true)
+        closesocket(s);
+    #else
+        close(s);
+    #endif
+}
 
 #endif
