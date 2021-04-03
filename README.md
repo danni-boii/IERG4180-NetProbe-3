@@ -27,9 +27,9 @@ Thank you for the contribution for this project
 > The server source file is located at `\IERG4180-NetProbe-3\NetProbe_Server\netprobe_server.cpp`
 > 
 > The common header file is located at `\IERG4180-NetProbe-3\core.h`
-
-To run the programme
-
+>
+> ###TTo run the programme
+>
 > Go into the folder containing the exe file `cd \IERG4180-NetProbe-3\Debug`
 >
 > run exe with arguments `netprobe_client.exe -send -proto tcp`
@@ -51,11 +51,8 @@ To run the programme
 > type `make all` to compile the executable files
 > 
 > The executable files are compiled as 'netprobecli' (Client) and 'netprobesrv' (Server)
-
-To run the programme
-
 >
-> Go in to the folder containing the executables `cd /IERG4180-NetProbe-3/Debug`
+> ###To run the programme
 >
 > run the file `./netprobecli -send -proto tcp`
 >
