@@ -16,6 +16,7 @@ int main(int argc, char* argv[]) {
 	NetProbeConfig nc;
 	nc.mode = NETPROBE_SEND_MODE;	 //Default send mode
 	nc.protocol = NETPROBE_UDP_MODE; //Default UDP send
+	nc.lport = 4181;
 
 	if (argc == 1) {
 		usage_message_client();
@@ -215,7 +216,7 @@ int main(int argc, char* argv[]) {
 			si_other.sin_port = htons((short)nc.rport);
 			si_other.sin_addr.s_addr = inet_addr(ipv4hostname.c_str());
 
-			//Set Send Buffer Size
+			//Set Send Buffer Size 
 			if (setsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)(&nc.sbufsize_inbyte), sizeof(nc.sbufsize_inbyte)) < 0)
 			{
 				#if(OSISWINDOWS==true)
@@ -225,6 +226,14 @@ int main(int argc, char* argv[]) {
 				#endif
 				return 5;
 			}
+			////Set to blocking mode
+			//u_long nMode = 0; // 0: BLOCKING
+			//if (ioctlsocket(s, FIONBIO, &nMode) == SOCKET_ERROR)
+			//{
+			//	closesocket(s);
+			//	WSACleanup();
+			//	return 15;
+			//}
 
 			long pkt_num = 0;
 			long total_sent_size = 0;
@@ -282,24 +291,24 @@ int main(int argc, char* argv[]) {
 					total_sent_size += sendto_size;
 					pkt_num++;
 					ZeroMemory(message, sizeof(message));
-				}
-				if (nc.mode == NETPROBE_SEND_MODE) {
-					sendInfo(nc, starting_time, pkt_num, total_sent_size);
-				}
-				if (nc.mode == NETPROBE_RESP_MODE) {
-					//Calculate the jitter time
-					clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
-					float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
-					if (pkt_taken_time_ms < minResponseTime) {
-						minResponseTime = pkt_taken_time_ms;
+					if (nc.mode == NETPROBE_SEND_MODE) {
+						sendInfo(nc, starting_time, pkt_num, total_sent_size);
 					}
-					if (pkt_taken_time_ms > maxResponseTime) {
-						maxResponseTime = pkt_taken_time_ms;
+					if (nc.mode == NETPROBE_RESP_MODE) {
+						//Calculate the jitter time
+						clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
+						float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
+						if (pkt_taken_time_ms < minResponseTime) {
+							minResponseTime = pkt_taken_time_ms;
+						}
+						if (pkt_taken_time_ms > maxResponseTime) {
+							maxResponseTime = pkt_taken_time_ms;
+						}
+						mean_recv_time = (float)((mean_recv_time * (recvfrom_pkt - 1)) + pkt_taken_time) / (recvfrom_pkt);
+						mean_jitter_time = (float)((mean_jitter_time * (recvfrom_pkt - 1)) + (pkt_taken_time - mean_jitter_time)) / (recvfrom_pkt);
+						prev_pkt_time = recv_pkt_time;
+						response_message_client(nc, starting_time, recvfrom_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
 					}
-					mean_recv_time = (float)((mean_recv_time * (recvfrom_pkt - 1)) + pkt_taken_time) / (recvfrom_pkt);
-					mean_jitter_time = (float)((mean_jitter_time * (recvfrom_pkt - 1)) + (pkt_taken_time - mean_jitter_time)) / (recvfrom_pkt);
-					prev_pkt_time = recv_pkt_time;
-					response_message_client(starting_time, recvfrom_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
 				}
 			}
 			closesocket_comp(s);
@@ -479,27 +488,27 @@ int main(int argc, char* argv[]) {
 					}
 					sent_pkt++;
 					total_sent_size += sent_byte;
+					if (nc.mode == NETPROBE_SEND_MODE) {
+						sendInfo(nc, starting_time, sent_pkt, total_sent_size);
+					}
+					if (nc.mode == NETPROBE_RESP_MODE) {
+						recv_pkt++;
+						//Calculate the jitter time
+						clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
+						float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
+						if (pkt_taken_time_ms < minResponseTime) {
+							minResponseTime = pkt_taken_time_ms;
+						}
+						if (pkt_taken_time_ms > maxResponseTime) {
+							maxResponseTime = pkt_taken_time_ms;
+						}
+						mean_recv_time = (float)((mean_recv_time * (recv_pkt - 1)) + pkt_taken_time) / (recv_pkt);
+						mean_jitter_time = (float)((mean_jitter_time * (recv_pkt - 1)) + (pkt_taken_time - mean_jitter_time)) / (recv_pkt);
+						prev_pkt_time = recv_pkt_time;
+						response_message_client(nc, starting_time, recv_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
+						ZeroMemory(packet, sizeof(packet));
+					}
 					if (sent_pkt >= nc.pkt_num && nc.pkt_num != 0) break;
-				}
-				if (nc.mode == NETPROBE_SEND_MODE) {
-					sendInfo(nc, starting_time, sent_pkt, total_sent_size);
-				}
-				if (nc.mode == NETPROBE_RESP_MODE) {
-					recv_pkt++;
-					//Calculate the jitter time
-					clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
-					float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
-					if (pkt_taken_time_ms < minResponseTime) {
-						minResponseTime = pkt_taken_time_ms;
-					}
-					if (pkt_taken_time_ms > maxResponseTime) {
-						maxResponseTime = pkt_taken_time_ms;
-					}
-					mean_recv_time = (float)((mean_recv_time * (recv_pkt-1)) + pkt_taken_time) / (recv_pkt);
-					mean_jitter_time = (float)((mean_jitter_time * (recv_pkt-1)) + (pkt_taken_time - mean_jitter_time)) / (recv_pkt);
-					prev_pkt_time = recv_pkt_time;
-					response_message_client(starting_time, recv_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
-					ZeroMemory(packet, sizeof(packet));
 				}
 			}
 			closesocket_comp(s);

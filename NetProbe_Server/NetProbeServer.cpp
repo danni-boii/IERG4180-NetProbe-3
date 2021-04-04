@@ -9,6 +9,8 @@
 // netprobe_server.exe [arguments]
 
 #include "../netprobe_core.h"
+#include "../tinycthread.h"
+#include "../tinycthread_pool.h"
 
 using namespace std;
 
@@ -20,7 +22,8 @@ using namespace std;
 * 
 */
 typedef struct socketWithMtx {
-	SOCKET s;
+	SOCKET tcps;
+	SOCKET udps;
 	mtx_t lock;
 }socketWithMtx;
 
@@ -31,7 +34,7 @@ mtx_t lock;
 
 void RequestHandler_thread(void* arg) {
 	socketWithMtx* swm = (socketWithMtx*)arg;
-	SOCKET client_sock = swm->s;
+	SOCKET client_sock = swm->tcps;
 	mtx_t thread_lock = swm->lock;
 
 	NetProbeConfig nc;
@@ -44,28 +47,28 @@ void RequestHandler_thread(void* arg) {
 		getpeername(client_sock, (sockaddr*)&peerinfo, &namelen);
 	#else
 		unsigned int namelen_linux = sizeof(sockaddr_in);
-		getpeername(socketHandles[i], (sockaddr*)&peerinfo, &namelen_linux);
+		getpeername(client_sock, (sockaddr*)&peerinfo, &namelen_linux);
 	#endif
 
 	char* client_ip = inet_ntoa(peerinfo.sin_addr);
 	int client_port = ntohs(peerinfo.sin_port);
-	bool isNotifyMessage = false;
 	char first4char[5];
 
 	ZeroMemory(recv_buf, sizeof(recv_buf));
-	free(recv_buf);
+
+	//printf("\n Connection recevied from [%s], port [%d]\n",client_ip,client_port);	//Debug
+
 	recv_size = recv(client_sock, recv_buf, nc.pkt_size_inbyte, 0);
 
 	/**
 	 * Rebuild the netprobe config from the incoming packet
 	*/
 
-	if (recv_size != 0) {
+	if (recv_size > 0) {
 		memcpy(first4char, recv_buf, DEFAULT_NCH_LEN);
 		first4char[4] = '\0';
 		if (strcmp(first4char, DEFAULT_NCH) == 0) { //Check for a nc header packet
 			rebuildFromNHBuilder(recv_buf, &nc);
-			isNotifyMessage = true;
 			netProbeConnectMessage(nc, client_ip, client_port);
 			send(client_sock, recv_buf, DEFAULT_CONFIG_HEADER_SIZE, 0);
 
@@ -87,11 +90,10 @@ void RequestHandler_thread(void* arg) {
 			}
 		}
 		ZeroMemory(recv_buf, sizeof(recv_buf));
-		free(recv_buf);
-		closesocket_comp(client_sock);
 	}
 	else {
 		closesocket_comp(client_sock);
+		return;
 	}
 
 	/**
@@ -128,7 +130,7 @@ void RequestHandler_thread(void* arg) {
 				}
 			}
 		}
-		else if (nc.mode == NETPROBE_RECV_MODE) {
+		if (nc.mode == NETPROBE_RECV_MODE) {
 			//The client is in receive mode, so we need to send the data
 			InfinityLoop{
 				time_interval_ms = pkt_timeInterval(nc);
@@ -161,7 +163,12 @@ void RequestHandler_thread(void* arg) {
 		mtx_unlock(&thread_lock);
 		return;
 	}
-	else if (nc.protocol == NETPROBE_UDP_MODE) {
+	if (nc.protocol == NETPROBE_UDP_MODE) {
+		/* Do not close the udp socket
+		   Since all udp connections are technically
+		   connecting to the same socket.
+		*/
+		client_sock = swm->udps;
 		mtx_lock(&(thread_lock));
 		UDP_connetion_counter++;
 		mtx_unlock(&thread_lock);
@@ -190,12 +197,11 @@ void RequestHandler_thread(void* arg) {
 				{
 					cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
 					free(buf);
-					closesocket_comp(client_sock);
 					break;
 				}
 			}
 		}
-		else if (nc.mode == NETPROBE_RECV_MODE) {
+		if (nc.mode == NETPROBE_RECV_MODE) {
 			struct sockaddr_in si_other;
 			si_other.sin_family = AF_INET;
 			si_other.sin_port = htons((short)nc.lport);
@@ -220,7 +226,6 @@ void RequestHandler_thread(void* arg) {
 					sent_pkt++;
 					if ((sent_pkt >= nc.pkt_num && nc.pkt_num != 0) || sendto_size <= SOCKET_ERROR) {
 						cout << " Host disconnected or error... tid: " << this_thread::get_id() << endl;
-						closesocket_comp(client_sock);
 						break;
 					}
 				}
@@ -241,7 +246,7 @@ void AdminThread(void* threadpool) {
 	clock_t startTimer = clock();
 	while (pool->shutdown == 0) {
 		//Pause the thread for a while
-		thrd_sleep(&sleep_time, NULL);
+		//thrd_sleep(&sleep_time, NULL);
 		//set the thread size to half after 60secs of 50% lower usage.
 		if (((float)pool->busy_thread / pool->thread_count) < 0.5) {
 			if (clock() > adminclock) {
@@ -259,8 +264,7 @@ void AdminThread(void* threadpool) {
 				adminclock = clock();
 			}
 		}
-		startTimer = clock();
-		server_stats(startTimer / CLOCKS_PER_SEC, pool->thread_count, pool->busy_thread, TCP_connetion_counter, UDP_connetion_counter);
+		server_stats(startTimer, pool->thread_count, pool->busy_thread, TCP_connetion_counter, UDP_connetion_counter);
 	}
 }
 
@@ -276,7 +280,6 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 		printf("Error on creating threadpool.\n");
 		return;
 	}
-	threadpool_add(thp, AdminThread, (void*)thp, 0);
 
 	/// Step 1: Prepare address structures. ///
 	sockaddr_in* SER_Addr = new sockaddr_in;
@@ -284,23 +287,23 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 	SER_Addr->sin_family = AF_INET;
 	SER_Addr->sin_port = htons(atoi(port));
 	SER_Addr->sin_addr.s_addr = INADDR_ANY;
-
+	int len = sizeof(SOCKADDR);
 
 	/// Step 2: Create a socket for incoming connections. ///
 	SOCKET Sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	bind(Sockfd, (sockaddr*)SER_Addr, sizeof(sockaddr_in));
 	listen(Sockfd, 5);
-
 	printf("\n TCP Listen Socket created.\n");
 
 	//Create the UDP socket
 	SOCKET UDPfd = socket(AF_INET, SOCK_DGRAM, 0);
 	bind(UDPfd, (sockaddr*)SER_Addr, sizeof(sockaddr_in));
-
 	printf(" UDP Socket created.\n");
 
+	threadpool_add(thp, AdminThread, (void*)thp, 0);
+
 	InfinityLoop{
-		int len = sizeof(SOCKADDR);
+		threadpool_t* thp_backup = thp;	//For some unknown reason, thp becomes NULL after accepting a new socket.
 		SOCKET client_sock = accept(Sockfd, (sockaddr*)&SER_Addr, &len);
 		if (client_sock < 0)
 		{
@@ -308,8 +311,10 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 			return;
 		}
 		socketWithMtx* swm = (socketWithMtx*)malloc(sizeof(socketWithMtx));
-		swm->s = client_sock;
+		swm->tcps = client_sock;
+		swm->udps = UDPfd;
 		swm->lock = lock;
+		if (thp != thp_backup) { thp = thp_backup; }
 		threadpool_add(thp, RequestHandler_thread, (void*)swm,  0);
 	}
 	threadpool_destroy(thp, 0);
@@ -407,190 +412,197 @@ void ConcurrentListenerUsingSelect(const char* port, NetProbeConfig npc)
 			ioctl(socketHandles[1], FIONBIO, noBlock);
 		#endif
 
-			// Process the active sockets //
-			for (i = 0; i < maxSockets; i++) {
-				if (!socketValid[i]) continue; // Only check for valid sockets.
-				//send bypassing FD_ISSET
-				if (nc[i].mode == NETPROBE_RECV_MODE && socketValid[i] && nc[i].protocol == NETPROBE_TCP_MODE && i > 1) { //if the client is in recv mode
-					//Handle the TCP recv request
-					time_interval_ms[i] = pkt_timeInterval(nc[i]);
-					if ((clock() / time_interval_ms[i]) > last_show_var[i]) {
-						last_show_var[i] = clock() / time_interval_ms[i];
-						char* packet = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
-						strncpy(packet, "sending_pkt_num= ", 18);
-						sprintf(packet_num, "%ld ", sent_pkt[i]);
-						strcat(packet, packet_num);
+		// Process the active sockets //
+		for (i = 0; i < maxSockets; i++) {
+			if (!socketValid[i]) continue; // Only check for valid sockets.
+			//send bypassing FD_ISSET
+			if (nc[i].mode == NETPROBE_RECV_MODE && socketValid[i] && nc[i].protocol == NETPROBE_TCP_MODE && i > 1) { //if the client is in recv mode
+				//Handle the TCP recv request
+				time_interval_ms[i] = pkt_timeInterval(nc[i]);
+				if ((clock() / time_interval_ms[i]) > last_show_var[i]) {
+					last_show_var[i] = clock() / time_interval_ms[i];
+					char* packet = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
+					strncpy(packet, "sending_pkt_num= ", 18);
+					sprintf(packet_num, "%ld ", sent_pkt[i]);
+					strcat(packet, packet_num);
 
-						//Send the packet to the client
-						int sent_byte = send(socketHandles[i], packet, nc[i].pkt_size_inbyte, 0);
-						//cout << " A packet sent, pkt_num = " << sent_pkt[i] << endl;
+					//Send the packet to the client
+					int sent_byte = send(socketHandles[i], packet, nc[i].pkt_size_inbyte, 0);
+					//cout << " A packet sent, pkt_num = " << sent_pkt[i] << endl;
 
-						ZeroMemory(packet, sizeof(packet));
-						free(packet);
-						sent_pkt[i]++;
+					ZeroMemory(packet, sizeof(packet));
+					free(packet);
+					sent_pkt[i]++;
 
-						if (sent_byte <= 0 || (sent_pkt[i] > nc[i].pkt_num && nc[i].pkt_num != 0))  //If the client is disconnected or error
+					if (sent_byte <= 0 || (sent_pkt[i] > nc[i].pkt_num && nc[i].pkt_num != 0))  //If the client is disconnected or error
+					{
+						printf(" Host disconnected...\n");
+						time_interval_ms[i] = 1;
+						socketValid[i] = false;
+						nc[i] = NetProbeConfig();
+						sent_pkt[i] = 0;
+						last_show_var[i] = 0;
+						--numActiveSockets;
+						if (numActiveSockets == (maxSockets - 1))
 						{
-							printf(" Host disconnected...\n");
-							time_interval_ms[i] = 1;
-							socketValid[i] = false;
+							socketValid[0] = true;
+						}
+						closesocket_comp(socketHandles[i]);
+					}
+				}
+			}
+			if (nc[i].mode == NETPROBE_RECV_MODE && socketValid[i] && nc[i].protocol == NETPROBE_UDP_MODE && i > 1) {
+				//Handle the udp recv request
+				time_interval_ms[i] = pkt_timeInterval(nc[i]);
+				if ((clock() / time_interval_ms[i]) > last_show_var[i]) {
+					struct sockaddr_in si_other;
+					si_other.sin_family = AF_INET;
+					si_other.sin_port = htons((short)nc[i].lport);
+					char* client_ip = inet_ntoa(peerinfo[i].sin_addr);
+					si_other.sin_addr.s_addr = inet_addr(client_ip);
+					last_show_var[i] = clock() / time_interval_ms[i];
+					char* message = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
+					strcpy(message, "send_pkt_num= ");
+					sprintf(packet_num, "%ld", sent_pkt[i]);
+					strcat(message, packet_num);
+
+					//send the message
+
+					int sendto_size = sendto(socketHandles[1], message, nc[i].pkt_size_inbyte, 0, (struct sockaddr*)&si_other, sizeof(si_other));
+
+					//cout << " Sendto " << client_ip << ", port: " << nc[i].lport << endl;	//Debug
+					sent_pkt[i]++;
+					if ((sent_pkt[i] >= nc[i].pkt_num && nc[i].pkt_num != 0) || sendto_size <= SOCKET_ERROR) {
+						cout << "Error here" << endl;
+						nc[i] = NetProbeConfig();
+						sent_pkt[i] = 0;
+						last_show_var[i] = 0;
+						time_interval_ms[i] = 1;
+						socketValid[i] = false;
+					}
+					ZeroMemory(message, sizeof(message));
+					free(message);
+				}
+			}
+			if (FD_ISSET(socketHandles[i], &fdReadSet)) { // Is socket i active?
+				if (i == 0) { // the socket for accept()
+					SOCKET newsfd = accept(Sockfd, 0, 0);
+					// Find a free entry in the socketHandles[] //
+					int j = 2;
+					for (; j < maxSockets; j++) {
+						if (socketValid[j] == false) {
+							socketValid[j] = true;
+							socketHandles[j] = newsfd;
+							++numActiveSockets;
+							if (numActiveSockets == maxSockets) {
+								// Ignore new accept()
+								socketValid[0] = false;
+							}
+							break;
+						}
+					}
+				}
+				if (i == 1 || (nc[i].protocol == NETPROBE_UDP_MODE && nc[i].mode == NETPROBE_SEND_MODE || nc[i].mode == NETPROBE_RESP_MODE)) {   //UDP recvfrom
+					int recv_len, slen, send_len;
+					char* buf = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
+					sockaddr_in si_other;    //The client socketaddr_in
+					slen = sizeof(si_other);
+
+					#if(OSISWINDOWS==true)
+						if (ret != 0) recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
+					#else
+						unsigned int slen_linux = sizeof(si_other);
+						recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
+					#endif
+
+					if (nc[i].mode == NETPROBE_RESP_MODE) {
+						send_len = sendto(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (struct sockaddr*)&si_other, sizeof(si_other));
+					}
+
+					//printf(" Receiving from [%s:%d]:\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
+
+					ZeroMemory(buf, sizeof(buf));
+					free(buf);
+
+					if (recv_len <= 0 && i != 1) {
+						// Update the socket array
+						if (i != 1) {
 							nc[i] = NetProbeConfig();
 							sent_pkt[i] = 0;
 							last_show_var[i] = 0;
-							--numActiveSockets;
-							if (numActiveSockets == (maxSockets - 1))
+							time_interval_ms[i] = 1;
+						}
+					}
+				}
+				else { // sockets for TCP recv()
+					if (nc[i].mode == NETPROBE_RECV_MODE) continue;
+					int recv_size;
+					char* recv_buf = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
+
+					#if(OSISWINDOWS==true)
+						getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen);
+					#else
+						unsigned int namelen_linux = sizeof(sockaddr_in);
+						getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen_linux);
+					#endif
+
+					char* client_ip = inet_ntoa(peerinfo[i].sin_addr);
+					int client_port = ntohs(peerinfo[i].sin_port);
+					long packet_num = 0;
+					bool isNotifyMessage = false;
+
+					recv_size = recv(socketHandles[i], recv_buf, nc[i].pkt_size_inbyte, 0);
+					if (nc[i].mode == NETPROBE_RESP_MODE) {
+						int sent_byte = send(socketHandles[i], recv_buf, nc[i].pkt_size_inbyte, 0);
+					}
+					//printf(" Received message len: %s\n", recv_buf);
+					if (recv_size != 0) {
+						memcpy(first4char, recv_buf, DEFAULT_NCH_LEN);
+						first4char[4] = '\0';
+						if (strcmp(first4char, DEFAULT_NCH) == 0) { //Check for a nc header packet
+							rebuildFromNHBuilder(recv_buf, &nc[i]);
+							isNotifyMessage = true;
+							netProbeConnectMessage(nc[i], client_ip, client_port);
+							send(socketHandles[i], recv_buf, DEFAULT_CONFIG_HEADER_SIZE, 0);
+
+							if (nc[i].sbufsize_inbyte <= 0) {
+								nc[i].sbufsize_inbyte = 65536;
+							}
+							if (nc[i].rbufsize_inbyte <= 0) {
+								nc[i].rbufsize_inbyte = 65536;
+							}
+							//Set Send Buffer Size
+							if (setsockopt(socketHandles[i], SOL_SOCKET, SO_SNDBUF, (char*)(&nc[i].sbufsize_inbyte), sizeof(nc[i].sbufsize_inbyte)) < 0)
 							{
+								#if(OSISWINDOWS==true)
+									printf("setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
+								#else
+									perror(" setsockopt() for SO_KEEPALIVE failed.\n");
+								#endif
+								return;
+							}
+						}
+						ZeroMemory(recv_buf, sizeof(recv_buf));
+						free(recv_buf);
+					}
+					else {// (recv_size == 0)  // connection closed
+						if (!isNotifyMessage && nc[i].protocol != NETPROBE_UDP_MODE)
+							printf(" Host disconnected [%s], port: %d \n", client_ip, client_port);
+						// Update the socket array
+						if (nc[i].protocol != NETPROBE_UDP_MODE) {
+							socketValid[i] = false;
+							nc[i] = NetProbeConfig();
+							--numActiveSockets;
+							if (numActiveSockets == (maxSockets - 1)) {
 								socketValid[0] = true;
 							}
 							closesocket_comp(socketHandles[i]);
 						}
 					}
 				}
-				if (nc[i].mode == NETPROBE_RECV_MODE && socketValid[i] && nc[i].protocol == NETPROBE_UDP_MODE && i > 1) {
-					//Handle the udp recv request
-					time_interval_ms[i] = pkt_timeInterval(nc[i]);
-					if ((clock() / time_interval_ms[i]) > last_show_var[i]) {
-						struct sockaddr_in si_other;
-						si_other.sin_family = AF_INET;
-						si_other.sin_port = htons((short)nc[i].lport);
-						char* client_ip = inet_ntoa(peerinfo[i].sin_addr);
-						si_other.sin_addr.s_addr = inet_addr(client_ip);
-						last_show_var[i] = clock() / time_interval_ms[i];
-						char* message = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
-						strcpy(message, "send_pkt_num= ");
-						sprintf(packet_num, "%ld", sent_pkt[i]);
-						strcat(message, packet_num);
-
-						//send the message
-
-						int sendto_size = sendto(socketHandles[1], message, nc[i].pkt_size_inbyte, 0, (struct sockaddr*)&si_other, sizeof(si_other));
-
-						//cout << " Sendto " << client_ip << ", port: " << nc[i].lport << endl;	//Debug
-						sent_pkt[i]++;
-						if ((sent_pkt[i] >= nc[i].pkt_num && nc[i].pkt_num != 0) || sendto_size <= SOCKET_ERROR) {
-							cout << "Error here" << endl;
-							nc[i] = NetProbeConfig();
-							sent_pkt[i] = 0;
-							last_show_var[i] = 0;
-							time_interval_ms[i] = 1;
-							socketValid[i] = false;
-						}
-						ZeroMemory(message, sizeof(message));
-						free(message);
-					}
-				}
-				if (FD_ISSET(socketHandles[i], &fdReadSet)) { // Is socket i active?
-					if (i == 0) { // the socket for accept()
-						SOCKET newsfd = accept(Sockfd, 0, 0);
-						// Find a free entry in the socketHandles[] //
-						int j = 2;
-						for (; j < maxSockets; j++) {
-							if (socketValid[j] == false) {
-								socketValid[j] = true;
-								socketHandles[j] = newsfd;
-								++numActiveSockets;
-								if (numActiveSockets == maxSockets) {
-									// Ignore new accept()
-									socketValid[0] = false;
-								}
-								break;
-							}
-						}
-					}
-					if (i == 1 || (nc[i].protocol == NETPROBE_UDP_MODE && nc[i].mode == NETPROBE_SEND_MODE)) {   //UDP recvfrom
-						int recv_len, slen;
-						char* buf = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
-						sockaddr_in si_other;    //The client socketaddr_in
-						slen = sizeof(si_other);
-
-						#if(OSISWINDOWS==true)
-							if (ret != 0) recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
-						#else
-							unsigned int slen_linux = sizeof(si_other);
-							recv_len = recvfrom(socketHandles[1], buf, nc[i].pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
-						#endif
-
-							//printf(" Receiving from [%s:%d]:\n", inet_ntoa(si_other.sin_addr), ntohs(si_other.sin_port));
-
-							ZeroMemory(buf, sizeof(buf));
-							free(buf);
-
-							if (recv_len <= 0 && i != 1) {
-								// Update the socket array
-								if (i != 1) {
-									nc[i] = NetProbeConfig();
-									sent_pkt[i] = 0;
-									last_show_var[i] = 0;
-									time_interval_ms[i] = 1;
-								}
-							}
-						}
-						else { // sockets for TCP recv()
-							if (nc[i].mode == NETPROBE_RECV_MODE) continue;
-							int recv_size;
-							char* recv_buf = (char*)malloc(sizeof(char) * nc[i].pkt_size_inbyte);
-
-							#if(OSISWINDOWS==true)
-								getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen);
-							#else
-								unsigned int namelen_linux = sizeof(sockaddr_in);
-								getpeername(socketHandles[i], (sockaddr*)&peerinfo[i], &namelen_linux);
-							#endif
-
-							char* client_ip = inet_ntoa(peerinfo[i].sin_addr);
-							int client_port = ntohs(peerinfo[i].sin_port);
-							long packet_num = 0;
-							bool isNotifyMessage = false;
-
-							recv_size = recv(socketHandles[i], recv_buf, nc[i].pkt_size_inbyte, 0);
-							//printf(" Received message len: %s\n", recv_buf);
-							if (recv_size != 0) {
-								memcpy(first4char, recv_buf, DEFAULT_NCH_LEN);
-								first4char[4] = '\0';
-								if (strcmp(first4char, DEFAULT_NCH) == 0) { //Check for a nc header packet
-									rebuildFromNHBuilder(recv_buf, &nc[i]);
-									isNotifyMessage = true;
-									netProbeConnectMessage(nc[i], client_ip, client_port);
-									send(socketHandles[i], recv_buf, DEFAULT_CONFIG_HEADER_SIZE, 0);
-
-									if (nc[i].sbufsize_inbyte <= 0) {
-										nc[i].sbufsize_inbyte = 65536;
-									}
-									if (nc[i].rbufsize_inbyte <= 0) {
-										nc[i].rbufsize_inbyte = 65536;
-									}
-									//Set Send Buffer Size
-									if (setsockopt(socketHandles[i], SOL_SOCKET, SO_SNDBUF, (char*)(&nc[i].sbufsize_inbyte), sizeof(nc[i].sbufsize_inbyte)) < 0)
-									{
-										#if(OSISWINDOWS==true)
-											printf("setsockopt() for SO_KEEPALIVE failed with error: %u\n", WSAGetLastError());
-										#else
-											perror(" setsockopt() for SO_KEEPALIVE failed.\n");
-										#endif
-										return;
-									}
-								}
-								ZeroMemory(recv_buf, sizeof(recv_buf));
-								free(recv_buf);
-							}
-							else {// (recv_size == 0)  // connection closed
-								if (!isNotifyMessage && nc[i].protocol != NETPROBE_UDP_MODE)
-									printf(" Host disconnected [%s], port: %d \n", client_ip, client_port);
-								// Update the socket array
-								if (nc[i].protocol != NETPROBE_UDP_MODE) {
-									socketValid[i] = false;
-									nc[i] = NetProbeConfig();
-									--numActiveSockets;
-									if (numActiveSockets == (maxSockets - 1)) {
-										socketValid[0] = true;
-									}
-									closesocket_comp(socketHandles[i]);
-								}
-							}
-						}
-						if (--ret == 0) break; // All active sockets processed.
-					}
-				}
+				if (--ret == 0) break; // All active sockets processed.
+			}
+		}
 	}
 }
 

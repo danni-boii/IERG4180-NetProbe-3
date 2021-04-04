@@ -16,9 +16,6 @@
 #include <algorithm>    //min_element()
 #include <math.h>       //Ceil()
 
-#include "tinycthread.h"
-#include "tinycthread_pool.h"
-
 /*
 * If [DEFAULT_NCH] is being modified,
 * [DEFAULT_NCH_LEN] should also change
@@ -88,16 +85,16 @@ public:
     int mode;   // send mode = 1, recv mode = 2, host mode = 3, 4 is reserved for server use, 5 is response mode
     int stat_displayspeed_perms;
     string rhostname;
-    int rport;
-    int protocol; // Use UDP for default , 1 is UDP, 2 is TCP, 3 is reserved for server use
-    int server_model;   //Use Select() as default, 1 is Select(), 2 is threadpool
-    int poolsize;   //Only used for thread-pool server model.   //maximum is 9999 since we pass it as a 4 digits string
+    int rport;                  // Server port number. (Default '4180')
+    int protocol;               // Use UDP for default , 1 is UDP, 2 is TCP, 3 is reserved for server use
+    int server_model;           // Use Select() as default, 1 is Select(), 2 is threadpool
+    int poolsize;               // Only used for thread-pool server model.   //maximum is 9999 since we pass it as a 4 digits string
     int pkt_size_inbyte;
-    int pkt_rate_bytepersec; // "0" = as fast as possible
-    int pkt_num; // Default "0" = infiinite
+    int pkt_rate_bytepersec;    // "0" = as fast as possible
+    int pkt_num;                // Default "0" = infiinite
     int sbufsize_inbyte;
     string lhostname;
-    int lport;
+    int lport;                  //Port number to bind to.
     int rbufsize_inbyte;
     string hhostname;
 
@@ -310,7 +307,7 @@ void netProbeConfig_info(NetProbeConfig nc) {
 void netProbeConnectMessage(NetProbeConfig nc, const char* client_ip, int client_port) {
     string proto = ncProtoConverttoString(nc.protocol);
     string mode = ncModeConverttoString(nc.mode);
-    cout << " Connected to [" << client_ip << "], port: " << client_port << ", " << mode << ", " << proto << ", " << nc.pkt_rate_bytepersec << " Bps" << endl;
+    cout << endl << " Connected to [" << client_ip << "], port: " << client_port << ", " << mode << ", " << proto << ", " << nc.pkt_rate_bytepersec << " Bps" << endl;
 }
 
 //Print the help info for using netprobe_server
@@ -448,21 +445,22 @@ void sendInfo(NetProbeConfig nc, clock_t starting_time, long sent_pkt, long tota
 }
 
 //Print the server statistics
-void server_stats(int nowtimer_sec, int totalThread, int busyThread, int tcpCount, int udpCount) {
-    //TODO: Goal = "Elapsed [120s] ThreadPool [32|25] TCP Clients [10] UDP Clients [15]"
-    printf("\r Elapsed [%ds] ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]         ",
-        nowtimer_sec, totalThread, busyThread, tcpCount, udpCount
+void server_stats(clock_t starting_time, int totalThread, int busyThread, int tcpCount, int udpCount) {
+    clock_t now_time = (clock() - starting_time) / CLOCKS_PER_SEC;    //Calculate the elapsed time in second
+    printf("\r Elapsed [%ds] ThreadPool [%d | %d] TCP Clients [%d] UDP Clients [%d]         ",
+        now_time, totalThread, busyThread, tcpCount, udpCount
     );
 }
 
 //Print the response message for client
-void response_message_client(clock_t starting_time, long recv_pkt, float min, float max, float avg, float jitter) {
-
-    clock_t now_time = (clock() - starting_time) / CLOCKS_PER_SEC;    //Calculate the elapsed time in second
-    printf("\r Elapsed [%ds] Replies [%l] Min [%.2fms] Max [%.2fms] Avg [%.2fms] Jitter [%.2fms]            ",
-        now_time, recv_pkt, min, max, avg, jitter
-    );
-
+void response_message_client(NetProbeConfig nc, clock_t starting_time, long recv_pkt, float min, float max, float avg, float jitter) {
+    static int last_show_var = 0;
+    if (((clock() - starting_time) / nc.stat_displayspeed_perms) > last_show_var) {
+        clock_t now_time = (clock() - starting_time) / CLOCKS_PER_SEC;    //Calculate the elapsed time in second
+        printf("\r Elapsed [%ds] Replies [%ld] Min [%.2fms] Max [%.2fms] Avg [%.2fms] Jitter [%.2fms]            ",
+            now_time, recv_pkt, min, max, avg, jitter
+        );
+    }
 }
 
 /**
@@ -478,11 +476,11 @@ int sendNCbuildMessage(NetProbeConfig nc, SOCKET s) {
     int recv_size = 0;
     strncpy(send_buf, NH_builder(nc).c_str(), DEFAULT_CONFIG_HEADER_SIZE);
     if ((sent_byte = send(s, send_buf, DEFAULT_CONFIG_HEADER_SIZE, 0)) == SOCKET_ERROR) {
-        printf("\n Send failed\n");
+        printf("\n Send failed.\n");
         return 1;
     }
     if ((recv_size = recv(s, recv_buf, DEFAULT_CONFIG_HEADER_SIZE, 0)) == SOCKET_ERROR) {
-        printf(" Recv Failed.\n");
+        printf("\n Recv Failed.\n");
         return 2;
     }
     return 0;
