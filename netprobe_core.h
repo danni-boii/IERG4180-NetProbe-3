@@ -16,6 +16,9 @@
 #include <algorithm>    //min_element()
 #include <math.h>       //Ceil()
 
+#include "tinycthread.h"
+#include "tinycthread_pool.h"
+
 /*
 * If [DEFAULT_NCH] is being modified,
 * [DEFAULT_NCH_LEN] should also change
@@ -117,6 +120,13 @@ public:
         poolsize = 8;
     }
 };
+
+timespec getTimeSpecValue(int millisec) {
+    timespec req;
+    req.tv_sec = (time_t)(millisec / 1000);
+    req.tv_nsec = (millisec % 1000) * 1000000;
+    return req;
+}
 
 /**
  * @brief Convert some int value into a string
@@ -437,22 +447,22 @@ void sendInfo(NetProbeConfig nc, clock_t starting_time, long sent_pkt, long tota
     }
 }
 
-//Print the response message for server
-void response_message_server(NetProbeConfig nc) {
+//Print the server statistics
+void server_stats(int nowtimer_sec, int totalThread, int busyThread, int tcpCount, int udpCount) {
     //TODO: Goal = "Elapsed [120s] ThreadPool [32|25] TCP Clients [10] UDP Clients [15]"
-    string proto = ncProtoConverttoString(nc.protocol);
-    string mode = ncModeConverttoString(nc.mode);
-
-    //printf("\r Response: Elapsed [%ds] ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]");
+    printf("\r Elapsed [%ds] ThreadPool [%d|%d] TCP Clients [%d] UDP Clients [%d]         ",
+        nowtimer_sec, totalThread, busyThread, tcpCount, udpCount
+    );
 }
 
 //Print the response message for client
-void response_message_client(NetProbeConfig nc) {
-    //TODO: Goal = "Elapsed [120s] Replies [1234] Min [4.3ms] Max [10.2ms] Avg [8.0ms] Jitter [5.2ms]"
-    string proto = ncProtoConverttoString(nc.protocol);
-    string mode = ncModeConverttoString(nc.mode);
+void response_message_client(clock_t starting_time, long recv_pkt, float min, float max, float avg, float jitter) {
 
-    //printf("\r Response: Elapsed [%ds] Replies [%d] Min [%.2f] ax [%.2fms] Avg [%.2fs] Jitter [%.2fms]");
+    clock_t now_time = (clock() - starting_time) / CLOCKS_PER_SEC;    //Calculate the elapsed time in second
+    printf("\r Elapsed [%ds] Replies [%l] Min [%.2fms] Max [%.2fms] Avg [%.2fms] Jitter [%.2fms]            ",
+        now_time, recv_pkt, min, max, avg, jitter
+    );
+
 }
 
 /**

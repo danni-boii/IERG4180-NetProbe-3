@@ -28,7 +28,7 @@ Thank you for the contribution for this project
 > 
 > The common header file is located at `\IERG4180-NetProbe-3\core.h`
 >
-> ###TTo run the programme
+To run the programme
 >
 > Go into the folder containing the exe file `cd \IERG4180-NetProbe-3\Debug`
 >
@@ -52,7 +52,7 @@ Thank you for the contribution for this project
 > 
 > The executable files are compiled as 'netprobecli' (Client) and 'netprobesrv' (Server)
 >
-> ###To run the programme
+To run the programme
 >
 > run the file `./netprobecli -send -proto tcp`
 >

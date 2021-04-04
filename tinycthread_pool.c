@@ -106,8 +106,7 @@ threadpool_t *threadpool_create(int thread_count, int queue_size, int flags)
     return NULL;
 }
 
-int threadpool_add(threadpool_t *pool, void (*function)(void *),
-                   void *argument, int flags)
+int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument, int flags)
 {
     int err = 0;
     int next;
@@ -148,10 +147,11 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *),
                 /* try to create more thread to the threadpool */
                 int new_thread_count = pool->thread_count * 2;
                 if (new_thread_count >= MAX_THREADS) { new_thread_count = MAX_THREADS; }
-                for (i = pool->thread_count; i < new_thread_count; i++) {
-                    if (thrd_create(&(pool->threads[i - 1]), threadpool_thread, (void*)pool) != thrd_success) {
-                        threadpool_destroy(pool, 0);
-                        return threadpool_invalid;
+                int counter = 0;
+                while(pool->started < new_thread_count){
+                    if (thrd_create(&(pool->threads[counter]), threadpool_thread, (void*)pool) != thrd_success) {
+                        counter++;
+                        continue;
                     }
                     pool->thread_count++;
                     pool->started++;

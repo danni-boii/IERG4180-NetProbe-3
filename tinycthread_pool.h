@@ -26,8 +26,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _THREADPOOL_H_
-#define _THREADPOOL_H_
+#ifndef _TINYCTHREADPOOL_H_
+#define _TINYCTHREADPOOL_H_
 
 #ifdef __cplusplus
 extern "C" {

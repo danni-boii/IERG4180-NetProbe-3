@@ -164,11 +164,7 @@ int main(int argc, char* argv[]) {
 	if (connect(s, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR)
 	{
 		puts(" Connection error.");
-		#if(OSISWINDOWS==true)
-			closesocket(s);
-		#else
-			close(s);
-		#endif
+		closesocket_comp(s);
 		return 1;
 	}
 
@@ -180,11 +176,7 @@ int main(int argc, char* argv[]) {
 
 	//UDP socket
 	if (nc.protocol == NETPROBE_UDP_MODE) {
-		#if(OSISWINDOWS==true)
-			closesocket(s);	//Close the previous TCP socket
-		#else
-			close(s);
-		#endif
+		closesocket_comp(s); //Close the previous TCP socket
 
 		if ((s = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
 		{
@@ -197,7 +189,7 @@ int main(int argc, char* argv[]) {
 		}
 		printf(" Socket created.\n");
 
-		if (nc.mode == NETPROBE_SEND_MODE) {
+		if (nc.mode == NETPROBE_SEND_MODE || nc.mode == NETPROBE_RESP_MODE) {
 			//Sendto IP
 			struct sockaddr_in si_other;
 
@@ -237,12 +229,24 @@ int main(int argc, char* argv[]) {
 			long pkt_num = 0;
 			long total_sent_size = 0;
 			char* packet_num = (char*)malloc(((sizeof(pkt_num) * CHAR_BIT) + 2) / 3 + 2);
-			clock_t starting_time = clock();
 			char* message = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
 
 			//Calculate the timeinterval between packets.
 			int time_interval_ms = pkt_timeInterval(nc);
 			int last_show_var = 0;
+
+			int slen = sizeof(si_other);
+			int recv_len = 0;
+			unsigned int slen_linux = sizeof(si_other);
+
+			clock_t starting_time = clock();
+			clock_t prev_pkt_time = starting_time;
+			clock_t recv_pkt_time = starting_time;
+			double mean_recv_time = 0;
+			double mean_jitter_time = 0;
+			float minResponseTime = FLT_MAX;	//minimum response time in ms
+			float maxResponseTime = 0;			//maximum response time in ms
+			long recvfrom_pkt = 0;
 
 			while (true)
 			{
@@ -255,7 +259,18 @@ int main(int argc, char* argv[]) {
 					strcat(message, packet_num);
 					//send the message
 					int sendto_size = sendto(s, message, nc.pkt_size_inbyte, 0, (struct sockaddr*) & si_other, sizeof(si_other));
-					if (sendto_size == SOCKET_ERROR || sendto_size < 0)
+					if ( nc.mode == NETPROBE_RESP_MODE ) {
+						ZeroMemory(message, sizeof(message));
+						#if(OSISWINDOWS==true)
+							recv_len = recvfrom(s, message, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen);
+						#else
+							recv_len = recvfrom(s, message, nc.pkt_size_inbyte, 0, (sockaddr*)&si_other, &slen_linux);
+						#endif
+						recv_pkt_time = clock();
+						recvfrom_pkt++;
+					}
+					
+					if (sendto_size == SOCKET_ERROR || sendto_size < 0 || (nc.mode == NETPROBE_RESP_MODE && recv_len <= 0 ))
 					{
 						#if(OSISWINDOWS==true)
 							printf(" sendto() failed with error code : %d", WSAGetLastError());
@@ -268,14 +283,26 @@ int main(int argc, char* argv[]) {
 					pkt_num++;
 					ZeroMemory(message, sizeof(message));
 				}
-				sendInfo(nc, starting_time, pkt_num, total_sent_size);
+				if (nc.mode == NETPROBE_SEND_MODE) {
+					sendInfo(nc, starting_time, pkt_num, total_sent_size);
+				}
+				if (nc.mode == NETPROBE_RESP_MODE) {
+					//Calculate the jitter time
+					clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
+					float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
+					if (pkt_taken_time_ms < minResponseTime) {
+						minResponseTime = pkt_taken_time_ms;
+					}
+					if (pkt_taken_time_ms > maxResponseTime) {
+						maxResponseTime = pkt_taken_time_ms;
+					}
+					mean_recv_time = (float)((mean_recv_time * (recvfrom_pkt - 1)) + pkt_taken_time) / (recvfrom_pkt);
+					mean_jitter_time = (float)((mean_jitter_time * (recvfrom_pkt - 1)) + (pkt_taken_time - mean_jitter_time)) / (recvfrom_pkt);
+					prev_pkt_time = recv_pkt_time;
+					response_message_client(starting_time, recvfrom_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
+				}
 			}
-			#if(OSISWINDOWS==true)
-				closesocket(s);
-				WSACleanup();
-			#else
-				close(s);
-			#endif
+			closesocket_comp(s);
 		}
 		if (nc.mode == NETPROBE_RECV_MODE) {
 			//Recvfrom IP
@@ -354,11 +381,10 @@ int main(int argc, char* argv[]) {
 					if (recv_len == SOCKET_ERROR || recv_len < 0)
 					{
 				#if(OSISWINDOWS==true)
-						if (WSAGetLastError() == WSAEWOULDBLOCK)
-							continue;
-						printf(" recvfrom() failed with error code : %d\n", WSAGetLastError());
+					if (WSAGetLastError() == WSAEWOULDBLOCK) { continue; }
+					printf(" recvfrom() failed with error code : %d\n", WSAGetLastError());
 				#else
-						perror(" recvfrom() failed.\n");
+					perror(" recvfrom() failed.\n");
 				#endif
 					break;
 				}
@@ -400,39 +426,48 @@ int main(int argc, char* argv[]) {
 				ZeroMemory(buf, sizeof(buf));
 				prev_pkt_time = recv_pkt_time;
 			}
-			#if(OSISWINDOWS==true)
-				closesocket(s);
-			#else
-				close(s);
-			#endif
+			closesocket_comp(s);
 		}
 	}
 
 	//TCP socket
 	if (nc.protocol == NETPROBE_TCP_MODE) {
-		if (nc.mode == NETPROBE_SEND_MODE) {     //Sending to IP
+		if (nc.mode == NETPROBE_SEND_MODE || nc.mode == NETPROBE_RESP_MODE) {     //Sending to IP
 			//Send some data
 			char* packet = (char*)malloc(sizeof(char) * nc.pkt_size_inbyte);
 			long sent_pkt = 0;
 			int sent_byte = 0;
+			long recv_pkt = 0;
+			int recv_byte = 0;
+			float minResponseTime = FLT_MAX;	//minimum response time in ms
+			float maxResponseTime = 0;			//maximum response time in ms
 			long total_sent_size = 0;
 			char* packet_num = (char*)malloc(((sizeof(sent_pkt) * CHAR_BIT) + 2) / 3 + 2);
 
 			int time_interval_ms = pkt_timeInterval(nc);
 
 			clock_t starting_time = clock();
+			clock_t prev_pkt_time = starting_time;
+			clock_t recv_pkt_time = starting_time;
+			double mean_recv_time = 0;
+			double mean_jitter_time = 0;
+
 			int last_show_var = 0;
 
 			while (true) {
 				if (((clock() - starting_time) / time_interval_ms) > last_show_var) {
 					last_show_var = (clock() - starting_time) / time_interval_ms;
-					ZeroMemory(packet, sizeof(packet));
 					strncpy(packet, "sending_pkt_num= ", 18);
 					sprintf(packet_num, "%ld ", sent_pkt);
 					strcat(packet, packet_num);
 
 					sent_byte = send(s, packet, nc.pkt_size_inbyte, 0);
-					if (sent_byte < 0)
+					ZeroMemory(packet, sizeof(packet));
+					if (nc.mode == NETPROBE_RESP_MODE) {
+						recv_byte = recv(s, packet, nc.pkt_size_inbyte, 0);
+						recv_pkt_time = clock();
+					}
+					if (sent_byte < 0  || (nc.mode == NETPROBE_RESP_MODE && recv_byte < 0))
 					{
 						#if(OSISWINDOWS==true)
 							printf("\n Send failed, error: %u\n", WSAGetLastError());
@@ -446,13 +481,28 @@ int main(int argc, char* argv[]) {
 					total_sent_size += sent_byte;
 					if (sent_pkt >= nc.pkt_num && nc.pkt_num != 0) break;
 				}
-				sendInfo(nc, starting_time, sent_pkt, total_sent_size);
+				if (nc.mode == NETPROBE_SEND_MODE) {
+					sendInfo(nc, starting_time, sent_pkt, total_sent_size);
+				}
+				if (nc.mode == NETPROBE_RESP_MODE) {
+					recv_pkt++;
+					//Calculate the jitter time
+					clock_t pkt_taken_time = recv_pkt_time - prev_pkt_time;
+					float pkt_taken_time_ms = (float)pkt_taken_time / CLOCKS_PER_SEC * 1000;
+					if (pkt_taken_time_ms < minResponseTime) {
+						minResponseTime = pkt_taken_time_ms;
+					}
+					if (pkt_taken_time_ms > maxResponseTime) {
+						maxResponseTime = pkt_taken_time_ms;
+					}
+					mean_recv_time = (float)((mean_recv_time * (recv_pkt-1)) + pkt_taken_time) / (recv_pkt);
+					mean_jitter_time = (float)((mean_jitter_time * (recv_pkt-1)) + (pkt_taken_time - mean_jitter_time)) / (recv_pkt);
+					prev_pkt_time = recv_pkt_time;
+					response_message_client(starting_time, recv_pkt, minResponseTime, maxResponseTime, mean_recv_time, mean_jitter_time);
+					ZeroMemory(packet, sizeof(packet));
+				}
 			}
-			#if(OSISWINDOWS==true)
-				closesocket(s);
-			#else
-				close(s);
-			#endif
+			closesocket_comp(s);
 		}
 		if (nc.mode == NETPROBE_RECV_MODE) {     //Receiving from IP
 			sockaddr_in client_addr;
@@ -507,11 +557,7 @@ int main(int argc, char* argv[]) {
 				recvInfo(nc, starting_time, packet_num, 0, total_recv_size, mean_jitter_time);
 				ZeroMemory(recv_buf, sizeof(recv_buf));
 			}
-				#if(OSISWINDOWS==true)
-					closesocket(s);
-				#else
-					close(s);
-				#endif
+			closesocket_comp(s);
 		}
 	}
 	#if (OSISWINDOWS==true)
