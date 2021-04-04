@@ -15,18 +15,23 @@ This project used the following libery (with my own modification)
 
 Thank you for the contribution for this project
 
+The experiment report is named `Experiment-Asg3.docx`
+
 --------------
 ## For Windows
 --------------
-> The client.exe file is placed at `\IERG4180-NetProbe-3\Debug\netprobe_client.exe`
+> The client.exe file is placed at `\IERG4180-NetProbe-3\Debug\NetProbe_Client.exe`
 > 
-> The server.exe file is placed at `\IERG4180-NetProbe-3\Debug\netprobe_server.exe`
+> The server.exe file is placed at `\IERG4180-NetProbe-3\Debug\NetProbe_Server.exe`
 > 
-> The client source file is located at `\IERG4180-NetProbe-3\NetProbe_Client\netprobe_client.cpp`
+> The client source file is located at `\IERG4180-NetProbe-3\NetProbe_Client\NetProbeClient.cpp`
 > 
-> The server source file is located at `\IERG4180-NetProbe-3\NetProbe_Server\netprobe_server.cpp`
+> The server source file is located at `\IERG4180-NetProbe-3\NetProbe_Server\NetProbeServer.cpp`
 > 
-> The common header file is located at `\IERG4180-NetProbe-3\core.h`
+> The common header file is located at `\IERG4180-NetProbe-3\netprobe_core.h`
+>
+> The included header files are located at `\IERG4180-NetProbe-3\tinycthread*.*`
+>
 >
 To run the programme
 >
@@ -41,9 +46,13 @@ To run the programme
 > Thr programme was only tested on Ubuntu 20.04 LTS 64bit
 > 
 > Please git clone this project or download the following file
-> - \NetProbe_Client\netprobe_client.cpp
-> - \NetProbe_Server\netprobe_server.cpp
-> - \core.h
+> - \NetProbe_Client\NetProbeClient.cpp
+> - \NetProbe_Server\NetProbeServer.cpp
+> - \netprobe_core.h
+> - \tinycthread.h
+> - \tinycthread.c
+> - \tinycthread_pool.h
+> - \tinycthread_pool.c
 > - \makefile
 > 
 > Go into the downloaded folder `cd /IERG4180-NetProbe-3`
@@ -59,3 +68,6 @@ To run the programme
 > type `./netprobecli -help` for all the possible parameters.
 > 
 --------------
+## Sample Video
+
+![Demo](/Demo.mp4)

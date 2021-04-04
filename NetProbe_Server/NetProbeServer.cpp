@@ -31,7 +31,10 @@ int TCP_connetion_counter = 0;	//The total TCP connection of the server.
 int UDP_connetion_counter = 0;	//The total UDP connection of the server.
 mtx_t lock;
 
-
+/**
+ * @brief The function that handles different socket action
+ * @param arg - the socketWithMtx pointer
+*/
 void RequestHandler_thread(void* arg) {
 	socketWithMtx* swm = (socketWithMtx*)arg;
 	SOCKET client_sock = swm->tcps;
@@ -239,6 +242,10 @@ void RequestHandler_thread(void* arg) {
 	return;
 }
 
+/**
+ * @brief The master thread to manage the threadpool behaviour
+ * @param threadpool 
+*/
 void AdminThread(void* threadpool) {
 	threadpool_t* pool = (threadpool_t*)threadpool;
 	timespec sleep_time; sleep_time.tv_sec = 1; sleep_time.tv_nsec = 1000000;
@@ -287,7 +294,7 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 	SER_Addr->sin_family = AF_INET;
 	SER_Addr->sin_port = htons(atoi(port));
 	SER_Addr->sin_addr.s_addr = INADDR_ANY;
-	int len = sizeof(SOCKADDR);
+	int len = sizeof(sockaddr);
 
 	/// Step 2: Create a socket for incoming connections. ///
 	SOCKET Sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -304,10 +311,15 @@ void ConcurrentListenerUsingThreadPool(const char* port, NetProbeConfig npc) {
 
 	InfinityLoop{
 		threadpool_t* thp_backup = thp;	//For some unknown reason, thp becomes NULL after accepting a new socket.
+	#if OSISWINDOWS == true
 		SOCKET client_sock = accept(Sockfd, (sockaddr*)&SER_Addr, &len);
+	#else
+		socklen_t len_linux = sizeof(sockaddr);
+		SOCKET client_sock = accept(Sockfd, (sockaddr*)&SER_Addr, &len_linux);
+	#endif
 		if (client_sock < 0)
 		{
-			printf("Error on accept(), Error code : %u\n", WSAGetLastError());
+			printf("Error on accept()\n");
 			return;
 		}
 		socketWithMtx* swm = (socketWithMtx*)malloc(sizeof(socketWithMtx));

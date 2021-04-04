@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <ctime>
 #include <iostream>
-#include <limits.h>
 #include <chrono> 
 #include <thread>
 #include <algorithm>    //min_element()
@@ -44,6 +43,7 @@
 #if _WIN32
     #define OSISWINDOWS true    // True when os is a windows system, false when it is a linux(Not 100% confirm)
     #include <winsock2.h>
+    #include <limits.h>     //For FLT_MAX
     #pragma comment (lib, "ws2_32.lib")
 #else   //_Linux_ 
     #define OSISWINDOWS false   // True when os is a windows system, false when it is a linux(Not 100% confirm)
@@ -56,6 +56,7 @@
     #include <netdb.h>
     #include <stdlib.h> //exit(0);
     #include <sched.h>      //Scheduling API
+    #include <cfloat>      //For FLT_MAX
     #define ZeroMemory(Destination,Length) memset((Destination),0,(Length))  //The easier memset 0 method inheritanced from windows c++
     #define SOCKET_ERROR -1
     #define INVALID_SOCKET ~0
@@ -456,8 +457,9 @@ void server_stats(clock_t starting_time, int totalThread, int busyThread, int tc
 void response_message_client(NetProbeConfig nc, clock_t starting_time, long recv_pkt, float min, float max, float avg, float jitter) {
     static int last_show_var = 0;
     if (((clock() - starting_time) / nc.stat_displayspeed_perms) > last_show_var) {
+        last_show_var = (clock() - starting_time) / nc.stat_displayspeed_perms;
         clock_t now_time = (clock() - starting_time) / CLOCKS_PER_SEC;    //Calculate the elapsed time in second
-        printf("\r Elapsed [%ds] Replies [%ld] Min [%.2fms] Max [%.2fms] Avg [%.2fms] Jitter [%.2fms]            ",
+        printf("\r Resp: Elapsed [%ds] Replies [%ld] Min [%.2fms] Max [%.2fms] Avg [%.2fms] Jitter [%.2fms]            ",
             now_time, recv_pkt, min, max, avg, jitter
         );
     }

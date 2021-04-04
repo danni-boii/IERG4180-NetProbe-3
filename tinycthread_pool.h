@@ -42,6 +42,8 @@ extern "C" {
      * Increase this constants at your own risk
      * Large values might slow down your system
      */
+#include "tinycthread.h"
+
 #define MAX_THREADS 64
 #define MIN_THREADS 2   // 1 For admin thread and 1 for real processing
 #define MAX_QUEUE 65536

@@ -39,8 +39,6 @@
 #include <unistd.h>
 #endif
 
-#include "tinycthread.h"
-
 #include "tinycthread_pool.h"
 
 
@@ -89,7 +87,7 @@ threadpool_t *threadpool_create(int thread_count, int queue_size, int flags)
 
     /* Start worker threads */
     for(i = 0; i < thread_count; i++) {
-        if(thrd_create(&(pool->threads[i]), threadpool_thread, (void*)pool) != thrd_success) {
+        if(thrd_create(&(pool->threads[i]), (thrd_start_t)threadpool_thread, (void*)pool) != thrd_success) {
             threadpool_destroy(pool, 0);
             return NULL;
         }
@@ -149,7 +147,7 @@ int threadpool_add(threadpool_t *pool, void (*function)(void *), void *argument,
                 if (new_thread_count >= MAX_THREADS) { new_thread_count = MAX_THREADS; }
                 int counter = 0;
                 while(pool->started < new_thread_count){
-                    if (thrd_create(&(pool->threads[counter]), threadpool_thread, (void*)pool) != thrd_success) {
+                    if (thrd_create(&(pool->threads[counter]),(thrd_start_t) threadpool_thread, (void*)pool) != thrd_success) {
                         counter++;
                         continue;
                     }
