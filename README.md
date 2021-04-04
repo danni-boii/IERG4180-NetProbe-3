@@ -17,6 +17,22 @@ Thank you for the contribution for this project
 
 The experiment report is named [Experiment-Asg3.docx](/Experiment-Asg3.docx)
 
+### Attention
+
+For testing purposes, I locked the server mode to be threadpool mode with 8 threads initialized.
+
+To change the mode and test the other parameters, please delete the code in the [/NetProbe_Server/NetProbeServer.cpp](/NetProbe_Server/NetProbeServer.cpp#L682) file
+```
+/**
+* Test settings
+*/
+nc.mode = NETPROBE_SERV_PLACEHOLDER_MODE;
+nc.protocol = NETPROBE_NULL_PROTO;
+//test the multithread mode
+nc.server_model = NETPROBE_SERVMODEL_THEDPL;
+nc.poolsize = 8;
+```
+
 --------------
 ## For Windows
 --------------
